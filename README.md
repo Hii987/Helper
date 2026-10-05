@@ -37,7 +37,7 @@ Le modèle par défaut est `mistral-small-latest` (modifiable via `MISTRAL_MODEL
 
 ### API France Travail (optionnelle, gratuite)
 
-Sans elle, l'onglet Offres propose seulement des liens de recherche vers les sites d'offres.
+Sans elle, l'assistant et l'onglet Offres cherchent quand même sur le web ; l'API ajoute des offres officielles plus détaillées (salaire, description complète).
 
 1. Crée un compte sur https://francetravail.io et une application.
 2. Abonne l'application à l'API **« Offres d'emploi v2 »**.
