@@ -23,11 +23,17 @@ async def chat(messages: list[dict], temperature: float = 0.5) -> str:
 
 async def complete(messages: list[dict], temperature: float = 0.5, tools: list[dict] | None = None) -> dict:
     """Renvoie le message brut de l'assistant (avec éventuels `tool_calls`)."""
-    api_key = os.getenv("MISTRAL_API_KEY")
+    api_key = (os.getenv("MISTRAL_API_KEY") or "").strip().strip("\"'")
     if not api_key:
         raise LLMError(
             "Aucune clé MISTRAL_API_KEY configurée. Crée une clé gratuite sur "
             "https://console.mistral.ai/api-keys puis ajoute-la dans le fichier .env."
+        )
+    if not api_key.isascii() or " " in api_key:
+        raise LLMError(
+            "La clé MISTRAL_API_KEY du fichier .env n'est pas valide (elle contient des accents "
+            "ou des espaces). Remplace-la par ta vraie clé copiée depuis "
+            "https://console.mistral.ai/api-keys, puis redémarre l'application."
         )
 
     payload = {

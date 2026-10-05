@@ -122,3 +122,10 @@ def test_normalize_offer():
     assert offer["published"] == "2026-10-01"
     assert offer["alternance"] is True
     assert offer["url"].endswith("/123ABC")
+
+
+def test_llm_error_with_placeholder_key(client, monkeypatch):
+    monkeypatch.setenv("MISTRAL_API_KEY", "ta_clé_mistral")
+    resp = client.post("/api/chat", json={"messages": [{"role": "user", "content": "Salut"}]})
+    assert resp.status_code == 502
+    assert "n'est pas valide" in resp.json()["detail"]
