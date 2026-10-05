@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app import jobs, llm, main
+from app import jobs, llm, main, websearch
 
 
 @pytest.fixture
@@ -39,14 +39,21 @@ def test_profile_roundtrip(client):
     }
 
 
-def test_profile_is_sent_to_llm(client, fake_llm):
+def test_profile_is_sent_to_llm(client, monkeypatch):
+    seen = []
+
+    async def fake_complete(messages, temperature=0.5, tools=None):
+        seen.append(messages)
+        return {"content": "réponse simulée"}
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
     client.put("/api/profile", json={"name": "Alex", "target": "alternance marketing"})
     resp = client.post("/api/chat", json={"messages": [{"role": "user", "content": "Salut"}]})
-    assert resp.json() == {"text": "réponse simulée"}
-    system = fake_llm[0][0]
+    assert resp.json() == {"text": "réponse simulée", "steps": [], "offers": []}
+    system = seen[0][0]
     assert system["role"] == "system"
     assert "alternance marketing" in system["content"]
-    assert fake_llm[0][-1] == {"role": "user", "content": "Salut"}
+    assert seen[0][-1] == {"role": "user", "content": "Salut"}
 
 
 def test_letter_requires_offer(client, fake_llm):
@@ -88,11 +95,16 @@ def test_applications_crud(client):
     assert client.delete(f"/api/applications/{app_id}").status_code == 404
 
 
-def test_jobs_without_credentials_returns_links(client):
+def test_jobs_without_credentials_returns_links(client, monkeypatch):
+    async def fake_search_jobs(q, location="", kind="emploi", max_results=10):
+        return [{"title": f"{kind} {q}", "url": "https://www.indeed.fr/x", "snippet": ""}]
+
+    monkeypatch.setattr(websearch, "search_jobs", fake_search_jobs)
     data = client.get("/api/jobs", params={"q": "comptable", "location": "Lyon", "kind": "alternance"}).json()
     assert data["offers"] == []
     names = [l["name"] for l in data["links"]]
     assert "La bonne alternance" in names and "Indeed" in names
+    assert data["web"][0]["title"] == "alternance comptable"
     assert client.get("/api/jobs", params={"kind": "cdi"}).status_code == 400
 
 

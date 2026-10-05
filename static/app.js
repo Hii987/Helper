@@ -96,11 +96,33 @@ $("#chat-form").onsubmit = (e) => {
   addMessage("user", text);
   chatHistory.push({ role: "user", content: text });
   withBusy(e.submitter || $("#chat-form button"), async () => {
+    const pending = document.createElement("div");
+    pending.className = "msg assistant pending";
+    pending.textContent = "Je réfléchis et je cherche si besoin…";
+    $("#chat-log").append(pending);
     try {
-      const { text: answer } = await api("/api/chat", { method: "POST", body: { messages: chatHistory } });
+      const { text: answer, steps = [], offers = [] } = await api("/api/chat", {
+        method: "POST",
+        body: { messages: chatHistory },
+      });
+      pending.remove();
       chatHistory.push({ role: "assistant", content: answer });
+      if (steps.length) {
+        const div = document.createElement("div");
+        div.className = "steps";
+        div.innerHTML = steps.map((s) => `<div>🔎 ${escapeHtml(s)}</div>`).join("");
+        $("#chat-log").append(div);
+      }
       addMessage("assistant", answer);
+      if (offers.length) {
+        const div = document.createElement("div");
+        div.className = "chat-offers";
+        div.innerHTML = `<div class="meta">${offers.length} offre(s) trouvée(s) :</div>` + offers.map(offerCard).join("");
+        $("#chat-log").append(div);
+        $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
+      }
     } catch (err) {
+      pending.remove();
       chatHistory.pop();
       throw err;
     }
@@ -114,71 +136,86 @@ $("#chat-input").addEventListener("keydown", (e) => {
   }
 });
 
-// ---------- Recherche d'offres ----------
+// ---------- Offres (cartes réutilisées par l'assistant et l'onglet Offres) ----------
 
-let lastOffers = [];
+const offerStore = [];
+
+function offerCard(o) {
+  const i = offerStore.push(o) - 1;
+  const meta = [o.company, o.location, o.contract_type, o.salary, o.published, o.source && o.source !== "web" ? o.source : hostOf(o.url)]
+    .filter(Boolean)
+    .join(" · ");
+  return `
+    <div class="card">
+      <h3>${escapeHtml(o.title)}${o.alternance ? '<span class="badge">Alternance</span>' : ""}</h3>
+      <div class="meta">${escapeHtml(meta)}</div>
+      ${o.description || o.snippet ? `<div class="desc">${escapeHtml(o.description || o.snippet)}</div>` : ""}
+      <div class="actions">
+        <a href="${escapeHtml(o.url)}" target="_blank" rel="noopener"><button class="small secondary" type="button">Voir l'offre</button></a>
+        <button class="small" type="button" data-save="${i}">Suivre</button>
+        <button class="small secondary" type="button" data-letter="${i}">Lettre de motivation</button>
+      </div>
+    </div>`;
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+document.addEventListener("click", async (e) => {
+  const save = e.target.dataset?.save;
+  const letter = e.target.dataset?.letter;
+  if (save !== undefined) {
+    const o = offerStore[save];
+    try {
+      await api("/api/applications", {
+        method: "POST",
+        body: { title: o.title, company: o.company || "", contract_type: o.contract_type || "", location: o.location || "", url: o.url },
+      });
+      e.target.textContent = "Suivie ✓";
+      e.target.disabled = true;
+      toast("Ajoutée au suivi des candidatures.");
+    } catch (err) {
+      toast(err.message);
+    }
+  } else if (letter !== undefined) {
+    const o = offerStore[letter];
+    $("#letter-offer").value = [o.title, o.location, "", o.description || o.snippet || "", "", o.url].join("\n").trim();
+    $("#letter-company").value = o.company || "";
+    switchTab("letter");
+    toast("Astuce : colle le texte complet de l'offre pour une lettre plus précise.");
+  }
+});
+
+// ---------- Recherche d'offres ----------
 
 $("#jobs-form").onsubmit = (e) => {
   e.preventDefault();
   const params = new URLSearchParams(new FormData(e.target));
   withBusy(e.submitter, async () => {
     const data = await api(`/api/jobs?${params}`);
-    lastOffers = data.offers;
     $("#jobs-links").innerHTML =
       "<span class='meta'>Rechercher aussi sur :</span>" +
       data.links.map((l) => `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.name)} ↗</a>`).join("");
 
-    const results = $("#jobs-results");
-    if (data.error) {
-      results.innerHTML = `<p class="meta">Recherche France Travail indisponible : ${escapeHtml(data.error)}</p>`;
-      return;
+    let html = "";
+    if (data.offers.length) {
+      html += `<h2>France Travail (${data.offers.length})</h2>` + data.offers.map((o) => offerCard({ ...o, source: "France Travail" })).join("");
+    } else if (data.error) {
+      html += `<p class="meta">France Travail indisponible : ${escapeHtml(data.error)}</p>`;
     }
-    if (!data.offers.length) {
-      results.innerHTML = `<p class="meta">${
-        (await api("/api/status")).france_travail
-          ? "Aucune offre trouvée. Essaie d'autres mots-clés ou un autre département."
-          : "Configure l'API France Travail pour afficher les offres ici, ou utilise les liens ci-dessus."
-      }</p>`;
-      return;
+    if (data.web.length) {
+      html += `<h2>Sur le web (${data.web.length})</h2>` + data.web.map((o) => offerCard({ ...o, source: "web" })).join("");
+    } else if (data.web_error) {
+      html += `<p class="meta">Recherche web indisponible : ${escapeHtml(data.web_error)}</p>`;
     }
-    results.innerHTML = data.offers
-      .map(
-        (o, i) => `
-      <div class="card">
-        <h3>${escapeHtml(o.title)}${o.alternance ? '<span class="badge">Alternance</span>' : ""}</h3>
-        <div class="meta">${escapeHtml([o.company, o.location, o.contract_type, o.salary, o.published].filter(Boolean).join(" · "))}</div>
-        <div class="desc">${escapeHtml(o.description)}</div>
-        <div class="actions">
-          <a href="${escapeHtml(o.url)}" target="_blank" rel="noopener"><button class="small secondary" type="button">Voir l'offre</button></a>
-          <button class="small" type="button" data-save="${i}">Suivre</button>
-          <button class="small secondary" type="button" data-letter="${i}">Lettre de motivation</button>
-        </div>
-      </div>`
-      )
-      .join("");
+    $("#jobs-results").innerHTML =
+      html || "<p class='meta'>Aucune offre trouvée. Essaie d'autres mots-clés, ou demande à l'assistant de chercher pour toi.</p>";
   });
-};
-
-$("#jobs-results").onclick = async (e) => {
-  const save = e.target.dataset.save;
-  const letter = e.target.dataset.letter;
-  if (save !== undefined) {
-    const o = lastOffers[save];
-    try {
-      await api("/api/applications", {
-        method: "POST",
-        body: { title: o.title, company: o.company, contract_type: o.contract_type, location: o.location, url: o.url },
-      });
-      toast("Ajoutée au suivi des candidatures.");
-    } catch (err) {
-      toast(err.message);
-    }
-  } else if (letter !== undefined) {
-    const o = lastOffers[letter];
-    $("#letter-offer").value = `${o.title}\n${o.location}\n\n${o.description}`;
-    $("#letter-company").value = o.company;
-    switchTab("letter");
-  }
 };
 
 // ---------- CV & lettre ----------

@@ -1,5 +1,6 @@
 """Helper : assistant de recherche d'emploi, de stage et d'alternance."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-from . import db, jobs, llm, prompts  # noqa: E402  (après load_dotenv)
+from . import agent, db, jobs, llm, prompts, websearch  # noqa: E402  (après load_dotenv)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -101,7 +102,10 @@ async def _ask(messages: list[dict], temperature: float = 0.5) -> dict:
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    return await _ask(prompts.chat_messages(db.get_profile(), req.messages), 0.7)
+    try:
+        return await agent.run(db.get_profile(), req.messages)
+    except llm.LLMError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/api/letter")
@@ -130,12 +134,27 @@ async def email(req: EmailRequest):
 async def search_jobs(q: str = "", location: str = "", department: str = "", kind: str = "emploi"):
     if kind not in jobs.KINDS:
         raise HTTPException(status_code=400, detail="Type de contrat inconnu.")
-    result = {"offers": [], "links": jobs.external_links(q, location, kind), "error": None}
-    if jobs.is_configured():
-        try:
-            result["offers"] = await jobs.search(q, department, kind)
-        except Exception as exc:  # l'appli reste utilisable via les liens
-            result["error"] = str(exc)
+    result = {
+        "offers": [], "error": None,
+        "web": [], "web_error": None,
+        "links": jobs.external_links(q, location, kind),
+    }
+
+    async def from_france_travail():
+        if jobs.is_configured():
+            try:
+                result["offers"] = await jobs.search(q, department, kind)
+            except Exception as exc:  # l'appli reste utilisable via le web et les liens
+                result["error"] = str(exc)
+
+    async def from_web():
+        if q.strip():
+            try:
+                result["web"] = await websearch.search_jobs(q, location, kind)
+            except Exception as exc:
+                result["web_error"] = str(exc)
+
+    await asyncio.gather(from_france_travail(), from_web())
     return result
 
 

@@ -6,8 +6,8 @@ Application web locale qui t'aide à chercher un emploi, un stage ou une alterna
 
 | Onglet | Ce que ça fait |
 |---|---|
-| **Assistant** | Discussion libre avec l'IA (orientation, conseils, préparation d'entretien…), personnalisée avec ton profil. |
-| **Offres** | Recherche d'offres d'emploi / stage / alternance via l'API gratuite de France Travail, + liens directs vers Indeed, Welcome to the Jungle, LinkedIn, La bonne alternance, 1jeune1solution. Un clic pour suivre une offre ou générer la lettre de motivation. |
+| **Assistant** | Discussion avec l'IA, personnalisée avec ton profil. **Elle va chercher elle-même sur internet** : offres (Indeed, HelloWork, Welcome to the Jungle, France Travail, LinkedIn…), entreprises qui recrutent, salaires, écoles… Elle peut aussi lire une page d'offre pour en résumer le contenu. Les offres trouvées s'affichent avec des boutons « Suivre » et « Lettre de motivation ». |
+| **Offres** | Recherche d'offres d'emploi / stage / alternance sur le web et via l'API gratuite de France Travail, + liens directs vers Indeed, Welcome to the Jungle, LinkedIn, La bonne alternance, 1jeune1solution. Un clic pour suivre une offre ou générer la lettre de motivation. |
 | **CV & lettre** | Génère une lettre de motivation adaptée à une offre, ou analyse ton CV (points forts, améliorations, mots-clés manquants). |
 | **E-mails** | Rédige la réponse à un mail de recruteur : répondre, accepter un entretien, décliner, relancer, remercier — avec le ton choisi. |
 | **Candidatures** | Suivi de tes candidatures (statut, dates, contact, notes), avec mise en évidence des relances en retard et bouton « Rédiger une relance ». |
@@ -43,6 +43,17 @@ Sans elle, l'onglet Offres propose seulement des liens de recherche vers les sit
 2. Abonne l'application à l'API **« Offres d'emploi v2 »**.
 3. Copie l'identifiant et la clé secrète dans `.env` (`FRANCE_TRAVAIL_CLIENT_ID`, `FRANCE_TRAVAIL_CLIENT_SECRET`).
 
+## Comment l'assistant cherche sur internet
+
+L'IA Mistral utilise des « outils » (function calling) qu'elle appelle quand elle en a besoin :
+
+- `rechercher_offres_web` : recherche DuckDuckGo ciblée sur les sites d'offres (gratuit, sans clé) ;
+- `rechercher_offres_france_travail` : API officielle (si les identifiants sont configurés) ;
+- `recherche_web` : recherche générale (entreprises, salaires, formations…) ;
+- `lire_page` : lit le contenu d'une page (par exemple le détail d'une offre).
+
+Les étapes de recherche s'affichent dans la conversation (🔎). L'IA a pour consigne de ne citer que des offres et des liens réellement trouvés.
+
 ## Tests
 
 ```bash
@@ -56,6 +67,8 @@ app/
   main.py     # routes FastAPI
   llm.py      # client Mistral
   prompts.py  # prompts (chat, lettre, CV, e-mails)
+  agent.py    # assistant avec outils de recherche (function calling Mistral)
+  websearch.py # recherche web (DuckDuckGo) et lecture de pages
   jobs.py     # recherche d'offres France Travail + liens externes
   db.py       # SQLite : profil et candidatures
 static/       # interface web (HTML/CSS/JS sans dépendance)

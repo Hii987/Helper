@@ -108,3 +108,8 @@ details summary { cursor: pointer; color: var(--accent); margin-bottom: 8px; }
   opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px);
 }
 .toast.show { opacity: 1; }
+
+.steps { align-self: flex-start; font-size: .8rem; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+.msg.pending { opacity: .7; font-style: italic; }
+.chat-offers { align-self: stretch; }
+#tab-jobs h2 { font-size: 1rem; margin: 16px 0 8px; }
