@@ -8,6 +8,10 @@ SYSTEM_BASE = (
 )
 
 
+MAX_PROFILE_FIELD = 2500
+MAX_HISTORY = 10
+
+
 def _profile_block(profile: dict) -> str:
     parts = []
     labels = {
@@ -19,6 +23,8 @@ def _profile_block(profile: dict) -> str:
     }
     for key, label in labels.items():
         value = (profile.get(key) or "").strip()
+        if len(value) > MAX_PROFILE_FIELD:  # limite les tokens envoyés à chaque requête
+            value = value[:MAX_PROFILE_FIELD] + " […]"
         if value:
             parts.append(f"{label} : {value}")
     if not parts:
@@ -31,13 +37,13 @@ def system_message(profile: dict) -> dict:
 
 
 def chat_messages(profile: dict, history: list[dict]) -> list[dict]:
-    # On ne garde que les rôles attendus et les 20 derniers échanges.
+    # On ne garde que les rôles attendus et les derniers messages.
     clean = [
         {"role": m["role"], "content": m["content"]}
         for m in history
         if m.get("role") in ("user", "assistant") and m.get("content")
     ]
-    return [system_message(profile)] + clean[-20:]
+    return [system_message(profile)] + clean[-MAX_HISTORY:]
 
 
 def cover_letter_messages(profile: dict, offer: str, company: str, extra: str) -> list[dict]:

@@ -49,7 +49,7 @@ def test_profile_is_sent_to_llm(client, monkeypatch):
     monkeypatch.setattr(llm, "complete", fake_complete)
     client.put("/api/profile", json={"name": "Alex", "target": "alternance marketing"})
     resp = client.post("/api/chat", json={"messages": [{"role": "user", "content": "Salut"}]})
-    assert resp.json() == {"text": "réponse simulée", "steps": [], "offers": []}
+    assert resp.json() == {"text": "réponse simulée", "steps": [], "offers": [], "tokens": 0}
     system = seen[0][0]
     assert system["role"] == "system"
     assert "alternance marketing" in system["content"]

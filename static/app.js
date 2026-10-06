@@ -101,16 +101,18 @@ $("#chat-form").onsubmit = (e) => {
     pending.textContent = "Je réfléchis et je cherche si besoin…";
     $("#chat-log").append(pending);
     try {
-      const { text: answer, steps = [], offers = [] } = await api("/api/chat", {
+      const { text: answer, steps = [], offers = [], tokens = 0 } = await api("/api/chat", {
         method: "POST",
         body: { messages: chatHistory },
       });
       pending.remove();
       chatHistory.push({ role: "assistant", content: answer });
-      if (steps.length) {
+      if (steps.length || tokens) {
         const div = document.createElement("div");
         div.className = "steps";
-        div.innerHTML = steps.map((s) => `<div>🔎 ${escapeHtml(s)}</div>`).join("");
+        div.innerHTML =
+          steps.map((s) => `<div>🔎 ${escapeHtml(s)}</div>`).join("") +
+          (tokens ? `<div>≈ ${tokens.toLocaleString("fr-FR")} tokens utilisés</div>` : "");
         $("#chat-log").append(div);
       }
       addMessage("assistant", answer);

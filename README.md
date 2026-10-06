@@ -33,7 +33,12 @@ Ouvre ensuite http://localhost:8000.
 2. Choisis le plan gratuit **Experiment** et crée une clé dans *API Keys*.
 3. Mets-la dans `.env` : `MISTRAL_API_KEY=...`
 
-Le modèle par défaut est `mistral-small-latest` (modifiable via `MISTRAL_MODEL`). Le plan gratuit a des limites de débit : en cas de message « limite atteinte », attends quelques secondes.
+Le modèle par défaut est `mistral-small-latest` (modifiable via `MISTRAL_MODEL`).
+
+Le plan gratuit limite le débit (environ 1 requête par seconde) et le volume de tokens. L'appli s'y adapte :
+elle espace ses requêtes, réessaie automatiquement en cas de limite atteinte, raccourcit le CV et l'historique
+envoyés, et affiche sous chaque réponse le nombre de tokens utilisés. Ta consommation est visible sur
+https://console.mistral.ai/usage.
 
 ### API France Travail (optionnelle, gratuite)
 

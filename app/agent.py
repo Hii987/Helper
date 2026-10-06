@@ -8,7 +8,9 @@ import json
 
 from . import jobs, llm, prompts, websearch
 
-MAX_STEPS = 5
+MAX_STEPS = 3
+MAX_TOOL_RESULT = 4000  # caractères renvoyés à l'IA par outil
+MAX_SNIPPET = 200
 
 TOOLS = [
     {
@@ -97,7 +99,7 @@ async def _run_tool(name: str, args: dict, found: list[dict]) -> tuple[str, str]
     try:
         if name == "rechercher_offres_web":
             kind = args.get("type") if args.get("type") in jobs.KINDS else "emploi"
-            results = await websearch.search_jobs(args.get("mots_cles", ""), args.get("lieu", ""), kind)
+            results = _short(await websearch.search_jobs(args.get("mots_cles", ""), args.get("lieu", ""), kind, max_results=8))
             found.extend({"title": r["title"], "url": r["url"], "snippet": r["snippet"], "source": "web"} for r in results)
             step = f"Recherche d'offres sur le web : {args.get('mots_cles', '')} {args.get('lieu', '')}".strip()
             return json.dumps(results, ensure_ascii=False), step
@@ -111,16 +113,16 @@ async def _run_tool(name: str, args: dict, found: list[dict]) -> tuple[str, str]
                     "contract_type": o["contract_type"], "snippet": o["description"][:200], "source": "France Travail",
                 })
             short = [{k: o[k] for k in ("title", "company", "location", "contract_type", "salary", "url")}
-                     | {"description": o["description"][:400]} for o in offers]
+                     | {"description": o["description"][:MAX_SNIPPET]} for o in offers]
             step = f"Recherche France Travail : {args.get('mots_cles', '')} {args.get('departement', '')}".strip()
             return json.dumps(short, ensure_ascii=False), step
 
         if name == "recherche_web":
-            results = await websearch.search(args.get("requete", ""))
+            results = _short(await websearch.search(args.get("requete", ""), max_results=6))
             return json.dumps(results, ensure_ascii=False), f"Recherche web : {args.get('requete', '')}"
 
         if name == "lire_page":
-            page = await websearch.fetch_page(args.get("url", ""))
+            page = await websearch.fetch_page(args.get("url", ""), max_chars=3000)
             return json.dumps(page, ensure_ascii=False), f"Lecture de la page : {page['title'] or page['url']}"
 
         return json.dumps({"erreur": f"Outil inconnu : {name}"}), f"Outil inconnu : {name}"
@@ -128,6 +130,10 @@ async def _run_tool(name: str, args: dict, found: list[dict]) -> tuple[str, str]
         return json.dumps({"erreur": str(exc)}, ensure_ascii=False), f"Échec ({name}) : {exc}"
     except Exception as exc:  # une erreur réseau ne doit pas casser la conversation
         return json.dumps({"erreur": str(exc)}, ensure_ascii=False), f"Échec ({name}) : {exc}"
+
+
+def _short(results: list[dict]) -> list[dict]:
+    return [r | {"snippet": r.get("snippet", "")[:MAX_SNIPPET]} for r in results]
 
 
 async def run(profile: dict, history: list[dict]) -> dict:
@@ -141,13 +147,15 @@ async def run(profile: dict, history: list[dict]) -> dict:
 
     steps: list[str] = []
     found: list[dict] = []
+    tokens = 0
     tools = _tools()
 
     for _ in range(MAX_STEPS):
         message = await llm.complete(messages, temperature=0.4, tools=tools)
+        tokens += message.get("usage", {}).get("total_tokens", 0)
         calls = message.get("tool_calls") or []
         if not calls:
-            return {"text": message.get("content") or "", "steps": steps, "offers": _dedupe(found)}
+            return {"text": message.get("content") or "", "steps": steps, "offers": _dedupe(found), "tokens": tokens}
 
         messages.append({"role": "assistant", "content": message.get("content") or "", "tool_calls": calls})
         for call in calls:
@@ -161,13 +169,14 @@ async def run(profile: dict, history: list[dict]) -> dict:
             messages.append({
                 "role": "tool",
                 "name": fn.get("name", ""),
-                "content": result[:12000],
+                "content": result[:MAX_TOOL_RESULT],
                 "tool_call_id": call.get("id", ""),
             })
 
     # Trop d'étapes : on demande une réponse finale sans outils.
     message = await llm.complete(messages, temperature=0.4)
-    return {"text": message.get("content") or "", "steps": steps, "offers": _dedupe(found)}
+    tokens += message.get("usage", {}).get("total_tokens", 0)
+    return {"text": message.get("content") or "", "steps": steps, "offers": _dedupe(found), "tokens": tokens}
 
 
 def _dedupe(offers: list[dict]) -> list[dict]:
