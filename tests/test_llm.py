@@ -7,7 +7,7 @@ from app import llm, prompts
 
 
 def _resp(status, body=None, headers=None):
-    return httpx.Response(status, json=body or {}, headers=headers or {}, request=httpx.Request("POST", llm.MISTRAL_URL))
+    return httpx.Response(status, json=body or {}, headers=headers or {}, request=httpx.Request("POST", llm.GROQ_URL))
 
 
 OK = {"choices": [{"message": {"role": "assistant", "content": "ok"}}], "usage": {"total_tokens": 42}}
@@ -15,7 +15,7 @@ OK = {"choices": [{"message": {"role": "assistant", "content": "ok"}}], "usage":
 
 @pytest.fixture
 def fast(monkeypatch):
-    monkeypatch.setenv("MISTRAL_API_KEY", "abc123")
+    monkeypatch.setenv("GROQ_API_KEY", "abc123")
     sleeps = []
 
     async def fake_sleep(delay):

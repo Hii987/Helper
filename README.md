@@ -1,6 +1,6 @@
 # Helper — assistant emploi, stage & alternance
 
-Application web locale qui t'aide à chercher un emploi, un stage ou une alternance, avec une IA gratuite (**Mistral AI**).
+Application web locale qui t'aide à chercher un emploi, un stage ou une alternance, avec une IA gratuite (**Groq**).
 
 ## Fonctionnalités
 
@@ -27,18 +27,18 @@ uvicorn app.main:app --reload
 
 Ouvre ensuite http://localhost:8000.
 
-### Clé Mistral (gratuite)
+### Clé Groq (gratuite)
 
-1. Crée un compte sur https://console.mistral.ai
-2. Choisis le plan gratuit **Experiment** et crée une clé dans *API Keys*.
-3. Mets-la dans `.env` : `MISTRAL_API_KEY=...`
+1. Crée un compte sur https://console.groq.com
+2. Crée une clé dans *API Keys* (https://console.groq.com/keys).
+3. Mets-la dans `.env` : `GROQ_API_KEY=...`
 
-Le modèle par défaut est `mistral-small-latest` (modifiable via `MISTRAL_MODEL`).
+Le modèle par défaut est `llama-3.3-70b-versatile` (modifiable via `GROQ_MODEL`, voir https://console.groq.com/docs/models).
 
-Le plan gratuit limite le débit (environ 1 requête par seconde) et le volume de tokens. L'appli s'y adapte :
+Le plan gratuit limite le débit (environ 30 requêtes par minute) et le volume de tokens. L'appli s'y adapte :
 elle espace ses requêtes, réessaie automatiquement en cas de limite atteinte, raccourcit le CV et l'historique
 envoyés, et affiche sous chaque réponse le nombre de tokens utilisés. Ta consommation est visible sur
-https://console.mistral.ai/usage.
+https://console.groq.com/settings/limits.
 
 ### API France Travail (optionnelle, gratuite)
 
@@ -50,7 +50,7 @@ Sans elle, l'assistant et l'onglet Offres cherchent quand même sur le web ; l'A
 
 ## Comment l'assistant cherche sur internet
 
-L'IA Mistral utilise des « outils » (function calling) qu'elle appelle quand elle en a besoin :
+L'IA (Groq) utilise des « outils » (function calling) qu'elle appelle quand elle en a besoin :
 
 - `rechercher_offres_web` : recherche DuckDuckGo ciblée sur les sites d'offres (gratuit, sans clé) ;
 - `rechercher_offres_france_travail` : API officielle (si les identifiants sont configurés) ;
@@ -70,9 +70,9 @@ pytest
 ```
 app/
   main.py     # routes FastAPI
-  llm.py      # client Mistral
+  llm.py      # client Groq
   prompts.py  # prompts (chat, lettre, CV, e-mails)
-  agent.py    # assistant avec outils de recherche (function calling Mistral)
+  agent.py    # assistant avec outils de recherche (function calling)
   websearch.py # recherche web (DuckDuckGo) et lecture de pages
   jobs.py     # recherche d'offres France Travail + liens externes
   db.py       # SQLite : profil et candidatures
@@ -82,4 +82,4 @@ tests/
 
 ## Confidentialité
 
-Les données (profil, candidatures) restent dans le fichier `helper.db` sur ta machine. Le contenu de ton profil et les textes que tu soumets sont envoyés à Mistral uniquement au moment d'une requête à l'IA.
+Les données (profil, candidatures) restent dans le fichier `helper.db` sur ta machine. Le contenu de ton profil et les textes que tu soumets sont envoyés à Groq uniquement au moment d'une requête à l'IA.

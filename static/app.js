@@ -71,7 +71,7 @@ document.querySelectorAll("#tabs button").forEach((b) => (b.onclick = () => swit
 
 api("/api/status").then((s) => {
   $("#status").innerHTML = `
-    <span class="${s.llm ? "ok" : "ko"}">IA Mistral ${s.llm ? "connectée" : "non configurée (MISTRAL_API_KEY)"}</span>
+    <span class="${s.llm ? "ok" : "ko"}">IA Groq ${s.llm ? "connectée" : "non configurée (GROQ_API_KEY)"}</span>
     <span class="${s.france_travail ? "ok" : "ko"}">API France Travail ${s.france_travail ? "connectée" : "non configurée (liens externes uniquement)"}</span>`;
 });
 

@@ -1,6 +1,6 @@
 """Assistant conversationnel capable d'aller chercher des offres sur internet.
 
-Mistral décide lui-même d'appeler des outils (function calling) : recherche
+L'IA décide lui-même d'appeler des outils (function calling) : recherche
 d'offres sur le web, recherche via l'API France Travail, lecture d'une page.
 """
 

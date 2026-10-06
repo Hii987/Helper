@@ -75,10 +75,10 @@ def test_email_goals(client, fake_llm):
 
 
 def test_llm_error_without_key(client, monkeypatch):
-    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     resp = client.post("/api/chat", json={"messages": [{"role": "user", "content": "Salut"}]})
     assert resp.status_code == 502
-    assert "MISTRAL_API_KEY" in resp.json()["detail"]
+    assert "GROQ_API_KEY" in resp.json()["detail"]
 
 
 def test_applications_crud(client):
@@ -125,7 +125,7 @@ def test_normalize_offer():
 
 
 def test_llm_error_with_placeholder_key(client, monkeypatch):
-    monkeypatch.setenv("MISTRAL_API_KEY", "ta_clé_mistral")
+    monkeypatch.setenv("GROQ_API_KEY", "ta_clé_groq")
     resp = client.post("/api/chat", json={"messages": [{"role": "user", "content": "Salut"}]})
     assert resp.status_code == 502
     assert "n'est pas valide" in resp.json()["detail"]
