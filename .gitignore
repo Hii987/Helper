@@ -5,3 +5,5 @@ venv/
 .env
 *.db
 .pytest_cache/
+# Clé du compte de service Firebase
+*firebase-adminsdk*.json

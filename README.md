@@ -29,8 +29,8 @@ Ouvre ensuite http://localhost:8000.
 
 Les candidatures et les PDF sont stockés dans Firestore. Les PDF sont découpés en morceaux de 900 Ko (un document par morceau) : pas besoin de Cloud Storage, qui exige le plan payant.
 
-1. Crée un projet dédié sur https://console.firebase.google.com (chaque projet a son propre quota gratuit).
-2. *Build → Firestore Database → Create database* (mode production).
+1. Crée un projet dédié sur https://console.firebase.google.com (chaque projet a son propre quota gratuit) et mets son identifiant dans `.firebaserc`.
+2. Crée la base et ses règles (seul le serveur y accède) : `firebase deploy --only firestore`.
 3. *Paramètres du projet → Comptes de service → Générer une nouvelle clé privée* : garde le fichier JSON hors du dépôt.
 4. Dans `.env` : `FIREBASE_PROJECT_ID=<id du projet>` et `GOOGLE_APPLICATION_CREDENTIALS=<chemin du JSON>`.
 
