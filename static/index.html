@@ -1,176 +1,21 @@
 <!doctype html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Helper – Assistant emploi</title>
+  <title>Job search center</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <h1>Helper</h1>
-    <p class="subtitle">Ton assistant pour trouver un emploi, un stage ou une alternance</p>
-    <div id="status" class="status"></div>
-  </header>
-
-  <nav id="tabs">
-    <button data-tab="chat" class="active">Assistant</button>
-    <button data-tab="jobs">Offres</button>
-    <button data-tab="letter">CV &amp; lettre</button>
-    <button data-tab="email">E-mails</button>
-    <button data-tab="tracker">Candidatures</button>
-    <button data-tab="profile">Profil</button>
-  </nav>
-
-  <main>
-    <!-- Assistant -->
-    <section id="tab-chat" class="tab active">
-      <div id="chat-log" class="chat-log">
-        <div class="msg assistant">Bonjour ! Je peux chercher des offres pour toi sur internet, t'aider à cibler des métiers, préparer un entretien ou rédiger tes candidatures. Essaie par exemple : « Trouve-moi des alternances en marketing à Lyon ».</div>
-      </div>
-      <form id="chat-form" class="chat-form">
-        <textarea id="chat-input" rows="2" placeholder="Ex. : Trouve-moi des stages en développement web à Nantes · Quelles entreprises recrutent des alternants en comptabilité ?"></textarea>
-        <button type="submit">Envoyer</button>
-      </form>
-    </section>
-
-    <!-- Offres -->
-    <section id="tab-jobs" class="tab">
-      <form id="jobs-form" class="grid">
-        <label>Mots-clés <input name="q" placeholder="développeur web, comptable…"></label>
-        <label>Ville / région <input name="location" placeholder="Lyon"></label>
-        <label>Département <input name="department" placeholder="69" maxlength="3"></label>
-        <label>Type
-          <select name="kind">
-            <option value="emploi">Emploi</option>
-            <option value="stage">Stage</option>
-            <option value="alternance">Alternance</option>
-          </select>
-        </label>
-        <button type="submit">Rechercher</button>
-      </form>
-      <div id="jobs-links" class="links"></div>
-      <div id="jobs-results"></div>
-    </section>
-
-    <!-- CV & lettre -->
-    <section id="tab-letter" class="tab">
-      <label>Texte de l'offre <textarea id="letter-offer" rows="8" placeholder="Colle ici l'annonce…"></textarea></label>
-      <div class="grid">
-        <label>Entreprise <input id="letter-company"></label>
-        <label>Consignes <input id="letter-extra" placeholder="ton dynamique, mettre en avant mon stage chez…"></label>
-      </div>
-      <div class="actions">
-        <button id="letter-btn">Rédiger la lettre de motivation</button>
-        <button id="cv-btn" class="secondary">Analyser / adapter mon CV</button>
-      </div>
-      <div id="letter-output" class="output"></div>
-    </section>
-
-    <!-- E-mails -->
-    <section id="tab-email" class="tab">
-      <label>Mail reçu ou contexte <textarea id="email-received" rows="8" placeholder="Colle ici le mail du recruteur, ou décris la situation…"></textarea></label>
-      <div class="grid">
-        <label>Objectif
-          <select id="email-goal">
-            <option value="reply">Répondre</option>
-            <option value="accept">Accepter (entretien, offre…)</option>
-            <option value="decline">Décliner poliment</option>
-            <option value="followup">Relancer une candidature</option>
-            <option value="thanks">Remercier après un entretien</option>
-          </select>
-        </label>
-        <label>Ton
-          <select id="email-tone">
-            <option value="professionnel et chaleureux">Professionnel et chaleureux</option>
-            <option value="formel">Formel</option>
-            <option value="concis et direct">Concis et direct</option>
-            <option value="enthousiaste">Enthousiaste</option>
-          </select>
-        </label>
-        <label>Précisions <input id="email-extra" placeholder="disponible mardi ou jeudi après-midi…"></label>
-      </div>
-      <div class="actions"><button id="email-btn">Rédiger l'e-mail</button></div>
-      <div id="email-output" class="output"></div>
-    </section>
-
-    <!-- Candidatures -->
-    <section id="tab-tracker" class="tab">
-      <details id="reply-box" class="reply-box" open>
-        <summary>📩 J'ai reçu une réponse d'un recruteur</summary>
-        <p class="hint">Colle le mail : la fiche de suivi est créée ou mise à jour automatiquement (statut, date, contact), puis une préparation d'entretien est générée avec des recherches sur l'entreprise et une analyse détaillée des compétences demandées.</p>
-        <form id="reply-form">
-          <label>Message du recruteur <textarea name="message" rows="6" required placeholder="Bonjour, suite à votre candidature au poste de… nous souhaiterions vous rencontrer le…"></textarea></label>
-          <div class="grid">
-            <label>Candidature concernée
-              <select name="application_id"><option value="">Détecter automatiquement</option></select>
-            </label>
-          </div>
-          <label>Fiche de poste (facultatif, pour une analyse plus précise) <textarea name="offer_text" rows="3" placeholder="Colle ici le texte de l'annonce si l'appli ne l'a pas déjà"></textarea></label>
-          <button type="submit">Analyser et préparer l'entretien</button>
-        </form>
-        <div id="reply-result"></div>
-      </details>
-      <details>
-        <summary>Ajouter une candidature</summary>
-        <form id="app-form" class="grid">
-          <label>Poste <input name="title" required></label>
-          <label>Entreprise <input name="company"></label>
-          <label>Contrat <input name="contract_type" placeholder="CDI, stage, alternance…"></label>
-          <label>Lieu <input name="location"></label>
-          <label>Lien <input name="url" type="url"></label>
-          <label>Contact <input name="contact" placeholder="nom, e-mail…"></label>
-          <label>Postulé le <input name="applied_on" type="date"></label>
-          <label>Prochaine action <input name="next_action_on" type="date"></label>
-          <label class="wide">Notes <textarea name="notes" rows="2"></textarea></label>
-          <label class="wide">Fiche de poste <textarea name="offer_text" rows="3" placeholder="Texte de l'annonce (utilisé pour préparer l'entretien)"></textarea></label>
-          <button type="submit">Ajouter</button>
-        </form>
-      </details>
-      <div id="tracker-summary" class="summary"></div>
-      <div id="tracker-list"></div>
-    </section>
-
-    <!-- Profil -->
-    <section id="tab-profile" class="tab">
-      <p class="hint">Ces informations sont utilisées par l'assistant pour personnaliser ses réponses. Elles restent sur ta machine (base SQLite locale) et sont envoyées à Groq uniquement lors des requêtes.</p>
-      <form id="profile-form" class="grid">
-        <label>Nom <input name="name"></label>
-        <label>Objectif <input name="target" placeholder="Alternance en développement web, rentrée 2027"></label>
-        <label>Zone géographique <input name="location" placeholder="Île-de-France, télétravail…"></label>
-        <label class="wide">Compétences <textarea name="skills" rows="3"></textarea></label>
-        <label class="wide">CV (texte) <textarea name="cv" rows="12" placeholder="Colle ici le contenu de ton CV"></textarea></label>
-        <button type="submit">Enregistrer</button>
-      </form>
-    </section>
-  </main>
-
-  <dialog id="app-dialog">
-    <div class="dialog-head">
-      <div>
-        <h2 id="dlg-title"></h2>
-        <div id="dlg-meta" class="meta"></div>
-      </div>
-      <button class="secondary small" id="dlg-close" type="button">Fermer</button>
-    </div>
-    <div class="actions">
-      <button id="dlg-prepare" type="button">Générer la préparation</button>
-      <button id="dlg-reply" class="secondary" type="button">Rédiger la réponse au dernier message</button>
-    </div>
-    <div id="dlg-steps" class="steps"></div>
-    <div id="dlg-prep" class="output prep"></div>
-    <details>
-      <summary>Historique des échanges</summary>
-      <div id="dlg-events"></div>
-    </details>
-    <details>
-      <summary>Fiche de poste</summary>
-      <textarea id="dlg-offer" rows="8" placeholder="Colle ici le texte de l'annonce"></textarea>
-      <div class="actions"><button id="dlg-offer-save" class="secondary small" type="button">Enregistrer la fiche de poste</button></div>
-    </details>
-  </dialog>
-
-  <div id="toast" class="toast"></div>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-logo"></div><span>Job search center</span></div>
+      <nav class="nav" id="nav"></nav>
+      <div class="lang" id="lang"></div>
+    </aside>
+    <main id="view"></main>
+  </div>
+  <script src="/static/i18n.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

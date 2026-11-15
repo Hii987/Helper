@@ -1,204 +1,793 @@
-const $ = (sel) => document.querySelector(sel);
+const view = document.getElementById("view");
+const STATUSES = ["notsent", "sent", "positive", "refused"];
+const LOGO_COLORS = ["#1F2937", "#1E3A5F", "#334155", "#3F3F46", "#44403C", "#164E63"];
+const SECTION_KINDS = ["offerLink", "keyPoints", "cv", "letter", "email", "contact", "custom"];
+const DEFAULT_SECTIONS = { regular: ["offerLink", "keyPoints", "cv", "email"], spontaneous: ["email", "cv"] };
+const KEY_FIELDS = ["contract", "salary", "workMode", "experience", "start"];
+const KEY_LISTS = ["responsibilities", "requirements"];
 
-const STATUS_LABELS = {
-  a_postuler: "À postuler",
-  postule: "Postulé",
-  relance: "Relancé",
-  entretien: "Entretien",
-  offre: "Offre reçue",
-  refuse: "Refusé",
+const ICONS = {
+  inbox: '<path d="M3 12h5l1.5 3h5L16 12h5"/><path d="M3 12l3-7h12l3 7v7H3z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M16 16l5 5"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  filter: '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>',
+  chevron: '<path d="M6 9l6 6 6-6"/>',
+  up: '<path d="M6 15l6-6 6 6"/>',
+  back: '<path d="M15 5l-7 7 7 7"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  upload: '<path d="M12 16V4M6 10l6-6 6 6"/><path d="M4 20h16"/>',
+  file: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/>',
+  fileCheck: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9 13l2 2 4-4"/>',
+  mail: '<path d="M3 5h18v14H3z"/><path d="M3 6l9 7 9-7"/>',
 };
+const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#9CA3AF">'
+  + [6, 12, 18].map((y) => `<circle cx="9" cy="${y}" r="1.6"/><circle cx="15" cy="${y}" r="1.6"/>`).join("") + "</svg>";
+
+let apps = [];
+let appsLoaded = false;
+let rerender = () => {};
 
 // ---------- Utilitaires ----------
 
-function toast(text) {
-  const el = $("#toast");
-  el.textContent = text;
-  el.classList.add("show");
-  setTimeout(() => el.classList.remove("show"), 3500);
+function icon(name, size = 16, attrs = 'stroke="currentColor" stroke-width="1.75"') {
+  return `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" ${attrs} stroke-linecap="square">${ICONS[name]}</svg>`;
+}
+
+function esc(text) {
+  return String(text ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
 async function api(path, options = {}) {
+  const isJson = options.body && !(options.body instanceof Blob);
   const resp = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
     ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    headers: isJson ? { "Content-Type": "application/json" } : {},
+    body: isJson ? JSON.stringify(options.body) : options.body,
   });
   if (resp.status === 204) return null;
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(data.detail || `Erreur ${resp.status}`);
+  if (!resp.ok) throw Object.assign(new Error(data.detail || `Error ${resp.status}`), { status: resp.status });
   return data;
 }
 
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text ?? "";
-  return div.innerHTML;
+function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const opts = { month: "short", day: "numeric" };
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+  return d.toLocaleDateString(LOCALES[lang], opts);
 }
 
-async function withBusy(button, fn) {
-  const label = button.textContent;
-  button.disabled = true;
-  button.textContent = "Patiente…";
-  try {
-    await fn();
-  } catch (err) {
-    toast(err.message);
-  } finally {
-    button.disabled = false;
-    button.textContent = label;
-  }
+function logoColor(name) {
+  let hash = 0;
+  for (const c of name) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+  return LOGO_COLORS[hash % LOGO_COLORS.length];
 }
 
-function showOutput(el, text) {
-  el.innerHTML = "";
-  const copy = document.createElement("button");
-  copy.className = "secondary small copy-btn";
-  copy.textContent = "Copier";
-  copy.onclick = () => navigator.clipboard.writeText(text).then(() => toast("Copié !"));
-  el.append(copy, document.createTextNode(text));
+function logo(name, big = false) {
+  return `<div class="logo${big ? " big" : ""}" aria-hidden="true" style="background:${logoColor(name)}">${esc(name.charAt(0).toUpperCase())}</div>`;
 }
 
-// Rendu Markdown minimal (titres, listes, tableaux, citations, gras, liens) ; le texte est échappé avant.
-function renderMarkdown(text) {
-  const inline = (line) =>
-    escapeHtml(line.replace(/<(https?:\/\/[^\s>]+)>/g, "$1"))
-      .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)"'<>]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-      .replace(/(^|[\s(])(https?:\/\/[^\s)"'<>]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
-  const cells = (line) => line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
-  const lines = (text || "").split("\n");
-  let html = "";
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trimEnd();
-    // Tableau : ligne d'en-tête suivie de |---|---|
-    if (line.trim().startsWith("|") && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1] || "")) {
-      html += "<div class='table-wrap'><table><thead><tr>" + cells(line).map((c) => `<th>${inline(c)}</th>`).join("") + "</tr></thead><tbody>";
-      i += 2;
-      while (i < lines.length && lines[i].trim().startsWith("|")) {
-        html += "<tr>" + cells(lines[i]).map((c) => `<td>${inline(c)}</td>`).join("") + "</tr>";
-        i++;
-      }
-      html += "</tbody></table></div>";
-      i--;
-      continue;
-    }
-    const item = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)/);
-    if (item) {
-      html += html.endsWith("</ul>") ? "" : "<ul>";
-      html = html.replace(/<\/ul>$/, "") + `<li>${inline(item[1])}</li></ul>`;
-      continue;
-    }
-    const heading = line.match(/^(#{1,4})\s+(.*)/);
-    const quote = line.match(/^\s*>\s?(.*)/);
-    if (heading) html += `<h${heading[1].length + 1}>${inline(heading[2])}</h${heading[1].length + 1}>`;
-    else if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) html += "<hr>";
-    else if (quote) html += `<blockquote>${inline(quote[1])}</blockquote>`;
-    else if (line.trim()) html += `<p>${inline(line)}</p>`;
-  }
-  return html;
+function statusTag(status, big = false) {
+  return `<span class="status status-${status}${big ? " big" : ""}">${t("status." + status)}</span>`;
 }
 
-function switchTab(name) {
-  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.id === `tab-${name}`));
-  if (name === "tracker") loadApplications();
+function backLink(href, label) {
+  return `<a class="back" href="${href}">${icon("back", 14, 'stroke="currentColor" stroke-width="2"')}${label}</a>`;
 }
 
-document.querySelectorAll("#tabs button").forEach((b) => (b.onclick = () => switchTab(b.dataset.tab)));
-
-// ---------- Statut ----------
-
-api("/api/status").then((s) => {
-  $("#status").innerHTML = `
-    <span class="${s.llm ? "ok" : "ko"}">IA Groq ${s.llm ? "connectée" : "non configurée (GROQ_API_KEY)"}</span>
-    <span class="${s.france_travail ? "ok" : "ko"}">API France Travail ${s.france_travail ? "connectée" : "non configurée (liens externes uniquement)"}</span>`;
-});
-
-// ---------- Assistant (chat) ----------
-
-const chatHistory = [];
-
-function addMessage(role, content) {
-  const div = document.createElement("div");
-  div.className = `msg ${role}`;
-  div.textContent = content;
-  $("#chat-log").append(div);
-  $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
+function fileUrl(file, download = false) {
+  return `/api/files/${file.id}${download ? "?download=1" : ""}`;
 }
 
-$("#chat-form").onsubmit = (e) => {
-  e.preventDefault();
-  const input = $("#chat-input");
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = "";
-  addMessage("user", text);
-  chatHistory.push({ role: "user", content: text });
-  withBusy(e.submitter || $("#chat-form button"), async () => {
-    const pending = document.createElement("div");
-    pending.className = "msg assistant pending";
-    pending.textContent = "Je réfléchis et je cherche si besoin…";
-    $("#chat-log").append(pending);
-    try {
-      const { text: answer, steps = [], offers = [], tokens = 0 } = await api("/api/chat", {
-        method: "POST",
-        body: { messages: chatHistory },
-      });
-      pending.remove();
-      chatHistory.push({ role: "assistant", content: answer });
-      if (steps.length || tokens) {
-        const div = document.createElement("div");
-        div.className = "steps";
-        div.innerHTML =
-          steps.map((s) => `<div>🔎 ${escapeHtml(s)}</div>`).join("") +
-          (tokens ? `<div>≈ ${tokens.toLocaleString("fr-FR")} tokens utilisés</div>` : "");
-        $("#chat-log").append(div);
-      }
-      addMessage("assistant", answer);
-      if (offers.length) {
-        const div = document.createElement("div");
-        div.className = "chat-offers";
-        div.innerHTML = `<div class="meta">${offers.length} offre(s) trouvée(s) :</div>` + offers.map(offerCard).join("");
-        $("#chat-log").append(div);
-        $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
-      }
-    } catch (err) {
-      pending.remove();
-      chatHistory.pop();
-      throw err;
-    }
-  });
+function pagesLabel(n) {
+  return t(n === 1 ? "file.page" : "file.pages", { n });
+}
+
+function section(app, kind) {
+  return app.sections.find((s) => s.kind === kind);
+}
+
+async function loadApps() {
+  apps = await api("/api/applications");
+  appsLoaded = true;
+  apps.sort((a, b) => (a.lastStatusChangeAt < b.lastStatusChangeAt ? 1 : -1));
+  renderNav();
+}
+
+// ---------- Barre latérale et routes ----------
+
+function renderNav() {
+  const offers = location.hash.startsWith("#/offers");
+  const current = (on) => (on ? ' aria-current="page"' : "");
+  document.getElementById("nav").innerHTML = `
+    <a href="#/"${current(!offers)}>${icon("inbox", 18)}<span class="grow">${t("nav.box")}</span><span class="count">${apps.length}</span></a>
+    <a href="#/offers"${current(offers)}>${icon("search", 18)}<span>${t("nav.offers")}</span></a>`;
+  document.getElementById("lang").innerHTML = Object.keys(LOCALES)
+    .map((code) => `<button type="button" data-lang="${code}" aria-pressed="${code === lang}">${code.toUpperCase()}</button>`)
+    .join("");
+}
+
+document.getElementById("lang").onclick = (e) => {
+  const code = e.target.dataset.lang;
+  if (!code) return;
+  setLang(code);
+  renderNav();
+  rerender();
 };
 
-$("#chat-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    $("#chat-form").requestSubmit();
+function route() {
+  const [, page, id, sub] = location.hash.split("/");
+  view.className = "";
+  view.onclick = view.oninput = view.onchange = view.onsubmit = null;
+  if (page !== "new" && sub !== "edit") form = null;
+  renderNav();
+  if (page === "offers") return showOfferSearch();
+  if (page === "new") return showNew();
+  if (page === "a" && sub === "edit") return showEdit(id);
+  if (page === "a") return showDetail(id);
+  return showBox();
+}
+
+window.onhashchange = route;
+
+// ---------- Box ----------
+
+const box = { filter: "all", menuOpen: false };
+
+async function showBox() {
+  view.className = "list";
+  rerender = renderBox;
+  renderBox();
+  try {
+    await loadApps();
+    renderBox();
+  } catch (err) {
+    view.innerHTML = `<div class="banner error" role="status">${esc(err.message)}</div>`;
   }
-});
+}
 
-// ---------- Offres (cartes réutilisées par l'assistant et l'onglet Offres) ----------
-
-const offerStore = [];
-
-function offerCard(o) {
-  const i = offerStore.push(o) - 1;
-  const meta = [o.company, o.location, o.contract_type, o.salary, o.published, o.source && o.source !== "web" ? o.source : hostOf(o.url)]
-    .filter(Boolean)
-    .join(" · ");
-  return `
-    <div class="card">
-      <h3>${escapeHtml(o.title)}${o.alternance ? '<span class="badge">Alternance</span>' : ""}</h3>
-      <div class="meta">${escapeHtml(meta)}</div>
-      ${o.description || o.snippet ? `<div class="desc">${escapeHtml(o.description || o.snippet)}</div>` : ""}
-      <div class="actions">
-        <a href="${escapeHtml(o.url)}" target="_blank" rel="noopener"><button class="small secondary" type="button">Voir l'offre</button></a>
-        <button class="small" type="button" data-save="${i}">Suivre</button>
-        <button class="small secondary" type="button" data-letter="${i}">Lettre de motivation</button>
+function renderBox() {
+  const shown = box.filter === "all" ? apps : apps.filter((a) => a.status === box.filter);
+  const filters = ["all", ...STATUSES].map((key) => {
+    const count = key === "all" ? apps.length : apps.filter((a) => a.status === key).length;
+    const label = key === "all" ? t("filter.all") : t("status." + key);
+    return `<button type="button" data-filter="${key}" aria-pressed="${box.filter === key}">
+      <span class="mark" aria-hidden="true"></span><span class="grow">${label}</span><span class="count">${count}</span></button>`;
+  }).join("");
+  const rows = shown.map((a) => `
+    <div class="row">
+      <div class="col-main">${logo(a.company)}
+        <a class="row-link" href="#/a/${a.id}"><strong>${esc(a.company)}</strong><span>${esc(a.jobTitle || (a.type === "spontaneous" ? t("type.spontaneous") : ""))}</span></a>
       </div>
-    </div>`;
+      <div class="col-status">${statusTag(a.status)}</div>
+      <div class="col-date">${fmtDate(a.lastStatusChangeAt)}</div>
+    </div>`).join("");
+
+  view.innerHTML = `
+    <header class="page-head">
+      <h1>${t("nav.box")}</h1>
+      <div class="tools">
+        <div class="menu-wrap">
+          <button class="btn" type="button" id="filter-btn" aria-haspopup="true" aria-expanded="${box.menuOpen}">
+            ${icon("filter")}<span>${box.filter === "all" ? t("filter.label") : t("filter.active", { status: t("status." + box.filter) })}</span>${icon("chevron", 14, 'stroke="currentColor" stroke-width="2"')}
+          </button>
+          ${box.menuOpen ? `<div class="menu" role="group" aria-label="${t("filter.group")}">${filters}</div>` : ""}
+        </div>
+        <a class="btn btn-primary" href="#/new">${icon("plus", 16, 'stroke="currentColor" stroke-width="2.25"')}<span>${t("box.new")}</span></a>
+      </div>
+    </header>
+    <section class="table" aria-label="${t("box.applications")}">
+      <div class="table-inner">
+        <div class="row head"><div class="col-main">${t("box.colMain")}</div><div class="col-status">${t("box.colStatus")}</div><div class="col-date">${t("box.colDate")}</div></div>
+        ${rows || (appsLoaded ? `<div class="row"><p class="meta">${t("box.empty")}</p></div>` : "")}
+      </div>
+    </section>`;
+
+  view.onclick = (e) => {
+    if (e.target.closest("#filter-btn")) {
+      box.menuOpen = !box.menuOpen;
+      renderBox();
+    }
+    const pick = e.target.closest("[data-filter]");
+    if (pick) {
+      Object.assign(box, { filter: pick.dataset.filter, menuOpen: false });
+      renderBox();
+    }
+  };
+}
+
+// ---------- Page d'une candidature ----------
+
+async function showDetail(id) {
+  rerender = () => {};
+  view.innerHTML = "";
+  let app;
+  try {
+    app = await api(`/api/applications/${id}`);
+  } catch (err) {
+    view.innerHTML = backLink("#/", t("back.box")) + `<div class="banner error" role="status">${esc(err.message)}</div>`;
+    return;
+  }
+  const expanded = { letter: false };
+  rerender = () => renderDetail(app, expanded);
+  rerender();
+  view.onclick = (e) => {
+    if (e.target.closest("[data-expand-letter]")) {
+      expanded.letter = true;
+      rerender();
+    }
+  };
+}
+
+function paras(text) {
+  return text.split(/\n\s*\n/).map((p) => `<p>${esc(p.trim())}</p>`).join("");
+}
+
+function card(title, body, { cls = "", aside = "" } = {}) {
+  return `<section class="card ${cls}"><div class="card-head"><h2>${title}</h2>${aside}</div><div class="card-body">${body}</div></section>`;
+}
+
+function kv(key, value) {
+  return `<div class="kv"><div class="k">${key}</div><div class="v">${value}</div></div>`;
+}
+
+function keyPointsCard(s) {
+  const values = KEY_FIELDS.filter((k) => s[k]).map((k) => kv(t("key." + k), esc(s[k]))).join("");
+  const lists = KEY_LISTS.filter((k) => s[k]?.length)
+    .map((k) => `<div><div class="micro">${t("key." + k)}</div><ul>${s[k].map((i) => `<li>${esc(i)}</li>`).join("")}</ul></div>`)
+    .join("");
+  if (!values && !lists) return "";
+  return card(t("section.keyPoints"),
+    (values ? `<div class="key-values">${values}</div>` : "") + (lists ? `<div class="key-lists">${lists}</div>` : ""),
+    { cls: "key" });
+}
+
+function offerCard(s) {
+  if (!s?.rawText && !s?.url) return "";
+  const open = s.url ? `<a class="link" href="${esc(s.url)}" target="_blank" rel="noopener">${t("detail.openOriginal")}</a>` : "";
+  const body = s.rawText ? `<div class="prose scroll">${paras(s.rawText)}</div>` : `<a class="link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a>`;
+  return card(t("detail.jobOffer"), body, { cls: "wide", aside: open });
+}
+
+function cvCard(s, app, cls) {
+  if (!s?.file) return "";
+  const f = s.file;
+  const when = app.sentAt ? t("file.versionSent", { date: fmtDate(app.sentAt) }) : t("file.added", { date: fmtDate(f.addedAt) });
+  return card(t("detail.cvSent"), `
+    <div class="file-tile">
+      <img src="${fileUrl(f)}/preview" alt="">
+      <div class="stack">
+        <div><div class="file-name">${esc(f.name)}</div><div class="file-meta">${pagesLabel(f.pages)} · ${when}</div></div>
+        <div class="actions">
+          <a class="btn" href="${fileUrl(f)}" target="_blank" rel="noopener">${t("file.open")}</a>
+          <a class="btn" href="${fileUrl(f, true)}">${t("file.download")}</a>
+        </div>
+      </div>
+    </div>`, { cls });
+}
+
+function contactCard(s) {
+  if (!s) return "";
+  const parts = [];
+  if (s.name || s.position) {
+    parts.push(`<div class="kv">${s.name ? `<div class="person">${esc(s.name)}</div>` : ""}${s.position ? `<div class="meta">${esc(s.position)}</div>` : ""}</div>`);
+  }
+  if (s.phone) parts.push(kv(t("contact.phone"), `<a class="link" href="tel:${esc(s.phone.replace(/\s/g, ""))}">${esc(s.phone)}</a>`));
+  if (s.email) parts.push(kv(t("contact.email"), `<a class="link" href="mailto:${esc(s.email)}">${esc(s.email)}</a>`));
+  for (const x of s.extra || []) if (x.value) parts.push(kv(esc(x.label), esc(x.value)));
+  return parts.length ? card(t("detail.contact"), parts.join(""), { cls: "contact" }) : "";
+}
+
+function emailCard(s, main = false) {
+  if (!s || !(s.to || s.subject || s.sentAt || s.body)) return "";
+  const meta = [["to", s.to], ["subject", s.subject], ["sent", s.sentAt]]
+    .filter(([, v]) => v).map(([k, v]) => `<div>${t("email." + k)}: <span>${esc(v)}</span></div>`).join("");
+  const body = s.body ? `${meta ? '<div class="rule"></div>' : ""}<div class="prose${main ? " big" : ""}">${paras(s.body)}</div>` : "";
+  return card(t("section.email"), `<div class="mail-meta${main ? " inline" : ""}">${meta}</div>${body}`, { cls: main ? "key" : "" });
+}
+
+function letterCard(s, expanded) {
+  if (!s || !(s.file || s.text)) return "";
+  const paragraphs = (s.text || "").split(/\n\s*\n/);
+  const cut = !expanded && paragraphs.length > 2;
+  let body = s.text ? `<div class="prose">${paras(cut ? paragraphs.slice(0, 2).join("\n\n") : s.text)}${cut ? '<p class="more">…</p>' : ""}</div>` : "";
+  if (s.file) body += `<div class="actions"><a class="btn" href="${fileUrl(s.file)}" target="_blank" rel="noopener">${t("detail.openLetter")}</a></div>`;
+  else if (cut) body += `<div class="actions"><button class="btn" type="button" data-expand-letter>${t("detail.openLetter")}</button></div>`;
+  return card(t("section.letter"), body, { aside: s.file ? `<span class="meta">${esc(s.file.name)}</span>` : "" });
+}
+
+function customCards(app) {
+  return app.sections.filter((s) => s.kind === "custom" && (s.title || s.content))
+    .map((s) => card(esc(s.title || t("section.custom")), `<div class="prose">${paras(s.content)}</div>`)).join("");
+}
+
+function row(...cards) {
+  const html = cards.join("");
+  return html ? `<div class="cards">${html}</div>` : "";
+}
+
+function renderDetail(app, expanded) {
+  const regular = app.type === "regular";
+  const dates = [t("detail.updated", { date: fmtDate(app.lastStatusChangeAt) })];
+  if (app.sentAt) dates.push(t("detail.sent", { date: fmtDate(app.sentAt) }));
+  const reference = [contactCard(section(app, "contact"))];
+  const blocks = regular
+    ? [keyPointsCard(section(app, "keyPoints") || {}),
+       row(offerCard(section(app, "offerLink")), cvCard(section(app, "cv"), app, "narrowish")),
+       row(...reference, emailCard(section(app, "email")), letterCard(section(app, "letter"), expanded.letter), customCards(app))]
+    : [emailCard(section(app, "email"), true),
+       row(...reference, cvCard(section(app, "cv"), app), letterCard(section(app, "letter"), expanded.letter), customCards(app))];
+
+  view.innerHTML = `
+    ${backLink("#/", t("back.box"))}
+    <header class="detail-head">
+      <div class="identity">${logo(app.company, true)}
+        <div class="stack" style="gap:2px;min-width:0">
+          <h1>${esc(regular ? app.jobTitle || app.company : app.company)}</h1>
+          <div class="sub">${esc(regular ? app.company : app.jobTitle || t("type.spontaneous"))}</div>
+        </div>
+      </div>
+      <div class="meta-bar">
+        <span class="type-tag">${t(regular ? "type.regular" : "type.spontaneousShort")}</span>
+        ${statusTag(app.status, true)}
+        <span class="meta">${dates.join(" · ")}</span>
+        <a class="btn" href="#/a/${app.id}/edit">${icon("edit")}${t("detail.edit")}</a>
+      </div>
+    </header>
+    ${blocks.filter(Boolean).join("")}`;
+}
+
+// ---------- Formulaire (création et modification) ----------
+
+let form = null;
+let nextSectionId = 1;
+let prefill = null;
+
+function newSection(kind, values = {}) {
+  const base = {
+    offerLink: { url: "", paste: "" },
+    keyPoints: { ...Object.fromEntries([...KEY_FIELDS, ...KEY_LISTS].map((k) => [k, ""])), filledByAi: false },
+    cv: {},
+    letter: { text: "" },
+    email: { to: "", sentAt: "", subject: "", body: "" },
+    contact: { name: "", position: "", email: "", phone: "", extra: [] },
+    custom: { title: "", content: "" },
+  }[kind];
+  const s = { ...base, ...values, kind, id: values.id || `s${nextSectionId++}` };
+  if (kind === "keyPoints") for (const k of KEY_LISTS) if (Array.isArray(s[k])) s[k] = s[k].join("\n");
+  if (kind === "contact") s.extra = (s.extra || []).map((x) => ({ ...x }));
+  return s;
+}
+
+function startForm(type, values = {}) {
+  form = {
+    type, company: "", jobTitle: "", status: "notsent", ai: "idle", menuOpen: false, saving: false, error: "",
+    ...values,
+    sections: (values.sections || DEFAULT_SECTIONS[type].map((kind) => ({ kind }))).map((s) => newSection(s.kind, s)),
+  };
+}
+
+function showNew() {
+  view.className = "";
+  if (!form && prefill) {
+    const { url, rawText, ...basics } = prefill;
+    startForm("regular", basics);
+    Object.assign(section(form, "offerLink"), { url, paste: rawText });
+    prefill = null;
+  }
+  rerender = () => (form ? renderForm() : renderTypeStep());
+  rerender();
+}
+
+function renderTypeStep() {
+  view.innerHTML = `<div class="narrow">
+    ${backLink("#/", t("back.box"))}
+    <h1>${t("form.newTitle")}</h1>
+    <div class="type-cards">
+      <button class="btn type-card" type="button" data-type="regular">${icon("fileCheck", 28, 'stroke="#166534" stroke-width="1.5"')}${t("type.regular")}</button>
+      <button class="btn type-card" type="button" data-type="spontaneous">${icon("mail", 28, 'stroke="#166534" stroke-width="1.5"')}${t("type.spontaneous")}</button>
+    </div></div>`;
+  view.onclick = (e) => {
+    const pick = e.target.closest("[data-type]");
+    if (!pick) return;
+    startForm(pick.dataset.type);
+    renderForm();
+  };
+}
+
+async function showEdit(id) {
+  rerender = () => {};
+  view.innerHTML = "";
+  if (!form || form.id !== id) {
+    try {
+      startForm(null, await api(`/api/applications/${id}`));
+    } catch (err) {
+      view.innerHTML = backLink("#/", t("back.box")) + `<div class="banner error" role="status">${esc(err.message)}</div>`;
+      return;
+    }
+  }
+  rerender = renderForm;
+  renderForm();
+}
+
+function input(key, label, { type = "text", value = "", sec = "", ph = "", attrs = "", area = 0 } = {}) {
+  const data = `data-key="${key}"${sec ? ` data-sec="${sec}"` : ""} ${attrs}`;
+  const control = area
+    ? `<textarea class="field" rows="${area}" placeholder="${esc(ph)}" ${data}>${esc(value)}</textarea>`
+    : `<input class="field" type="${type}" placeholder="${esc(ph)}" value="${esc(value)}" ${data}>`;
+  return `<label class="lbl"><span>${label}</span>${control}</label>`;
+}
+
+function chooser(s, labelKey) {
+  return `<input type="file" accept="application/pdf" hidden data-file="${s.id}">
+    <button class="btn" type="button" data-action="choose">${t(labelKey)}</button>`;
+}
+
+function dropZone(s, textKey) {
+  const file = s._pending ? { name: s._pending.name } : s.file;
+  if (file) {
+    const meta = s._pending ? t("form.fileReady") : `${pagesLabel(file.pages)} · ${t("file.added", { date: fmtDate(file.addedAt) })}`;
+    return `<div class="file-row">${icon("file", 22, 'stroke="#4B5563" stroke-width="1.5"')}
+      <div><span class="file-name">${esc(file.name)}</span><span class="file-meta">${meta}</span></div>
+      ${chooser(s, "form.replaceFile")}</div>`;
+  }
+  return `<div class="drop" data-drop="${s.id}">${icon("upload", 22, 'stroke="#4B5563" stroke-width="1.5"')}
+    <span>${t(textKey)}</span>
+    ${chooser(s, "form.chooseFile")}</div>`;
+}
+
+function aiBanner(where) {
+  const f = form;
+  if (f.ai === "loading") {
+    return where === "link"
+      ? `<div class="banner loading" role="status"><span>${t("ai.reading")}</span><div class="progress"></div></div>`
+      : `<p class="banner loading" role="status">${t("ai.filling")}</p>`;
+  }
+  if (f.ai === "error" && where === "link") return `<p class="banner error" role="status">${esc(f.aiError)}</p>`;
+  if (f.ai === "done") {
+    return where === "link"
+      ? `<p class="banner success" role="status">${t("ai.retrieved", { source: esc(f.aiSource) })}</p>`
+      : `<p class="banner success">${t("ai.filled")}</p>`;
+  }
+  if (where === "link") return `<p class="help">${t(f.id ? "ai.helpEdit" : "ai.help")}</p>`;
+  return `<p class="banner neutral">${t(section(f, "keyPoints").filledByAi ? "ai.filled" : "ai.idle")}</p>`;
+}
+
+function sectionBody(s) {
+  const id = s.id;
+  const busy = form.ai === "loading" ? "disabled" : "";
+  switch (s.kind) {
+    case "offerLink":
+      return `<div class="fields">${input("url", t("form.offerUrl"), { type: "url", value: s.url, sec: id, ph: "https://" })}
+          <button class="btn ${s.fetchedAt || form.ai === "done" ? "" : "btn-primary"}" type="button" data-action="fetch" ${busy}>${t(s.fetchedAt || form.ai === "done" ? "form.fetchAgain" : "form.fetch")}</button></div>
+        ${aiBanner("link")}
+        ${input("paste", t("form.paste"), { value: s.paste, sec: id, ph: t("form.pastePh"), area: 3 })}`;
+    case "keyPoints":
+      return `${aiBanner("key")}
+        <div class="fields">${KEY_FIELDS.map((k) => input(k, t("key." + k), { value: s[k], sec: id, ph: t("ph." + k), attrs: busy })).join("")}</div>
+        <div class="fields">${KEY_LISTS.map((k) => input(k, t("form." + k), { value: s[k], sec: id, ph: t("ph." + k), attrs: busy, area: 4 })).join("")}</div>`;
+    case "cv":
+      return dropZone(s, "form.dropCv");
+    case "letter":
+      return dropZone(s, "form.dropLetter") + input("text", t("form.letterText"), { value: s.text, sec: id, ph: t("form.letterPh"), area: 4 });
+    case "email":
+      return `<div class="fields">${input("to", t("form.sentTo"), { type: "email", value: s.to, sec: id, ph: "name@company.com" })}
+          ${input("sentAt", t("form.dateSent"), { value: s.sentAt, sec: id, ph: t("ph.dateSent") })}</div>
+        ${input("subject", t("form.subject"), { value: s.subject, sec: id, ph: t("ph.subject") })}
+        ${input("body", t("form.message"), { value: s.body, sec: id, ph: t("ph.message"), area: 6 })}`;
+    case "contact":
+      return `<div class="fields">
+          ${input("name", t("form.name"), { value: s.name, sec: id, ph: t("ph.name") })}
+          ${input("position", t("form.position"), { value: s.position, sec: id, ph: t("ph.position") })}
+          ${input("email", t("contact.email"), { type: "email", value: s.email, sec: id, ph: "name@company.com" })}
+          ${input("phone", t("contact.phone"), { type: "tel", value: s.phone, sec: id, ph: "+00 0 00 00 00 00" })}</div>
+        ${s.extra.map((x, i) => `<div class="fields">
+          ${input("label", t("form.fieldName"), { value: x.label, sec: id, ph: t("ph.fieldName"), attrs: `data-extra="${i}"` })}
+          ${input("value", t("form.fieldValue"), { value: x.value, sec: id, attrs: `data-extra="${i}"` })}
+          <button class="icon-btn boxed" type="button" aria-label="${t("form.removeField")}" data-action="remove-extra" data-sec="${id}" data-extra="${i}">${icon("close", 16, 'stroke="currentColor" stroke-width="2"')}</button></div>`).join("")}
+        <div><button class="btn" type="button" data-action="add-extra" data-sec="${id}">${icon("plus", 14, 'stroke="currentColor" stroke-width="2.25"')}${t("form.addField")}</button></div>`;
+    case "custom":
+      return input("title", t("form.sectionTitle"), { value: s.title, sec: id, ph: t("ph.sectionTitle") })
+        + input("content", t("form.content"), { value: s.content, sec: id, ph: t("ph.content"), area: 4 });
+  }
+}
+
+function renderForm() {
+  const f = form;
+  const regular = f.type === "regular";
+  const editing = Boolean(f.id);
+  const present = new Set(f.sections.map((s) => s.kind));
+  const options = SECTION_KINDS
+    .filter((k) => (regular || !["offerLink", "keyPoints"].includes(k)) && (k === "custom" || !present.has(k)))
+    .map((k) => `<button class="option" type="button" data-add="${k}"><strong>${t("section." + k)}</strong><span>${t("desc." + k)}</span></button>`)
+    .join("");
+  const last = f.sections.length - 1;
+  const stroke2 = 'stroke="currentColor" stroke-width="2"';
+  const sections = f.sections.map((s, i) => {
+    const title = t("section." + s.kind);
+    return `<section class="mod" aria-label="${title}">
+      <div class="mod-head">${GRIP}<h2>${title}</h2>
+        <button class="icon-btn" type="button" aria-label="${t("form.moveUp", { title })}" data-action="move" data-sec="${s.id}" data-dir="-1" ${i === 0 ? "disabled" : ""}>${icon("up", 16, stroke2)}</button>
+        <button class="icon-btn" type="button" aria-label="${t("form.moveDown", { title })}" data-action="move" data-sec="${s.id}" data-dir="1" ${i === last ? "disabled" : ""}>${icon("chevron", 16, stroke2)}</button>
+        <button class="icon-btn" type="button" aria-label="${t("form.remove", { title })}" data-action="remove" data-sec="${s.id}">${icon("close", 16, stroke2)}</button>
+      </div>
+      <div class="mod-body">${sectionBody(s)}</div></section>`;
+  }).join("");
+  const typeLabel = t(regular ? "type.regular" : "type.spontaneous");
+  const busy = f.ai === "loading" ? "disabled" : "";
+
+  view.innerHTML = `<form class="narrow" id="app-form" novalidate>
+    ${editing ? backLink(`#/a/${f.id}`, t("back.application"))
+      : `<button class="back" type="button" data-action="change-type">${icon("back", 14, stroke2)}${t("form.changeType")}</button>`}
+    <header class="stack">
+      <div class="eyebrow">${editing ? typeLabel : t("form.step", { type: typeLabel })}</div>
+      <h1>${t(editing ? "form.editTitle" : "form.newTitle")}</h1>
+      <p class="lead">${t(editing ? "form.editLead" : "form.newLead")}</p>
+    </header>
+    <section class="mod" aria-labelledby="h-basics">
+      <div class="mod-head"><h2 id="h-basics">${t("form.basics")}</h2></div>
+      <div class="mod-body"><div class="fields">
+        ${input("company", t("form.company"), { value: f.company, ph: t("ph.company"), attrs: `required ${busy}` })}
+        ${input("jobTitle", t(regular ? "form.jobTitle" : "form.aimedPosition"), { value: f.jobTitle, ph: t(regular ? "ph.jobTitle" : "ph.aimedPosition"), attrs: busy })}
+        <label class="lbl"><span>${t("form.status")}</span><select class="field" data-key="status">
+          ${STATUSES.map((s) => `<option value="${s}" ${s === f.status ? "selected" : ""}>${t("status." + s)}</option>`).join("")}
+        </select></label>
+      </div></div>
+    </section>
+    ${sections}
+    <div class="menu-wrap" style="align-self:flex-start">
+      <button class="btn btn-accent" type="button" data-action="menu" aria-haspopup="true" aria-expanded="${f.menuOpen}">${icon("plus", 16, 'stroke="currentColor" stroke-width="2.25"')}${t("form.addSection")}</button>
+      ${f.menuOpen && options ? `<div class="menu left" role="group" aria-label="${t("form.addGroup")}">${options}</div>` : ""}
+    </div>
+    ${f.error ? `<p class="banner error" role="status">${esc(f.error)}</p>` : ""}
+    <div class="form-foot">
+      ${editing ? `<button class="btn btn-danger" type="button" data-action="delete">${t("form.delete")}</button>` : ""}
+      <div class="actions">
+        <a class="btn" href="${editing ? `#/a/${f.id}` : "#/"}">${t("form.cancel")}</a>
+        <button class="btn btn-primary" type="submit" ${f.saving ? "disabled" : ""}>${t(editing ? "form.saveChanges" : "form.save")}</button>
+      </div>
+    </div></form>`;
+
+  view.oninput = onFormInput;
+  view.onchange = onFormChange;
+  view.onclick = onFormClick;
+  view.onsubmit = (e) => {
+    e.preventDefault();
+    saveForm();
+  };
+  view.ondragover = (e) => {
+    const zone = e.target.closest("[data-drop]");
+    if (zone) {
+      e.preventDefault();
+      zone.classList.add("over");
+    }
+  };
+  view.ondragleave = (e) => e.target.closest("[data-drop]")?.classList.remove("over");
+  view.ondrop = (e) => {
+    const zone = e.target.closest("[data-drop]");
+    if (!zone) return;
+    e.preventDefault();
+    setFile(zone.dataset.drop, e.dataTransfer.files[0]);
+  };
+}
+
+function findSection(id) {
+  return form.sections.find((s) => s.id === id);
+}
+
+function onFormInput(e) {
+  const { key, sec, extra } = e.target.dataset;
+  if (!key) return;
+  if (!sec) {
+    form[key] = e.target.value;
+    return;
+  }
+  const s = findSection(sec);
+  if (extra !== undefined) s.extra[extra][key] = e.target.value;
+  else s[key] = e.target.value;
+  if (s.kind === "keyPoints") s.filledByAi = false;
+}
+
+function onFormChange(e) {
+  if (e.target.dataset.file) setFile(e.target.dataset.file, e.target.files[0]);
+}
+
+function setFile(sectionId, file) {
+  if (!file) return;
+  findSection(sectionId)._pending = file;
+  renderForm();
+}
+
+function onFormClick(e) {
+  const add = e.target.closest("[data-add]");
+  if (add) {
+    form.sections.push(newSection(add.dataset.add));
+    form.menuOpen = false;
+    return renderForm();
+  }
+  const el = e.target.closest("[data-action]");
+  if (!el) return;
+  const s = el.dataset.sec && findSection(el.dataset.sec);
+  const list = form.sections;
+  switch (el.dataset.action) {
+    case "change-type":
+      form = null;
+      return renderTypeStep();
+    case "menu":
+      form.menuOpen = !form.menuOpen;
+      break;
+    case "move": {
+      const i = list.indexOf(s);
+      const j = i + Number(el.dataset.dir);
+      [list[i], list[j]] = [list[j], list[i]];
+      break;
+    }
+    case "remove":
+      list.splice(list.indexOf(s), 1);
+      break;
+    case "add-extra":
+      s.extra.push({ label: "", value: "" });
+      break;
+    case "remove-extra":
+      s.extra.splice(Number(el.dataset.extra), 1);
+      break;
+    case "choose":
+      return el.previousElementSibling.click();
+    case "fetch":
+      return fetchOffer();
+    case "delete":
+      return deleteApplication();
+  }
+  renderForm();
+}
+
+async function fetchOffer() {
+  const link = section(form, "offerLink");
+  const kp = section(form, "keyPoints");
+  if (!link.url.trim() && !link.paste.trim()) {
+    Object.assign(form, { ai: "error", aiError: t("ai.needInput") });
+    return renderForm();
+  }
+  const edited = kp && !kp.filledByAi && [...KEY_FIELDS, ...KEY_LISTS].some((k) => kp[k].trim());
+  if (edited && !confirm(t("ai.confirmReplace"))) return;
+  form.ai = "loading";
+  renderForm();
+  try {
+    const r = await api("/api/offer/summary", { method: "POST", body: { url: link.url, text: link.paste } });
+    Object.assign(link, { rawText: r.rawText, fetchedAt: new Date().toISOString() });
+    if (kp) {
+      for (const k of KEY_FIELDS) kp[k] = r[k];
+      for (const k of KEY_LISTS) kp[k] = r[k].join("\n");
+      kp.filledByAi = true;
+    }
+    if (!form.company.trim()) form.company = r.company;
+    if (!form.jobTitle.trim()) form.jobTitle = r.jobTitle;
+    Object.assign(form, { ai: "done", aiSource: r.source || t("ai.pastedText") });
+  } catch (err) {
+    Object.assign(form, { ai: "error", aiError: err.status === 422 ? t("ai.unreadable") : err.message });
+  }
+  renderForm();
+}
+
+async function saveForm() {
+  const f = form;
+  if (!f.company.trim()) {
+    f.error = t("form.companyRequired");
+    return renderForm();
+  }
+  Object.assign(f, { saving: true, error: "" });
+  renderForm();
+  try {
+    for (const s of f.sections) {
+      if (!s._pending) continue;
+      s.file = await api(`/api/files?name=${encodeURIComponent(s._pending.name)}`, { method: "POST", body: s._pending });
+      delete s._pending;
+    }
+    const sections = f.sections.map(({ _pending, paste, ...s }) => {
+      if (s.kind === "offerLink" && paste?.trim()) s.rawText = paste.trim();
+      if (s.kind === "keyPoints") for (const k of KEY_LISTS) s[k] = s[k].split("\n").map((l) => l.trim()).filter(Boolean);
+      return s;
+    });
+    const body = { type: f.type, company: f.company.trim(), jobTitle: f.jobTitle.trim(), status: f.status, sections };
+    const saved = f.id
+      ? await api(`/api/applications/${f.id}`, { method: "PUT", body })
+      : await api("/api/applications", { method: "POST", body });
+    form = null;
+    location.hash = `#/a/${saved.id}`;
+    loadApps().catch(() => {});
+  } catch (err) {
+    Object.assign(f, { saving: false, error: err.message });
+    renderForm();
+  }
+}
+
+async function deleteApplication() {
+  if (!confirm(t("form.confirmDelete"))) return;
+  try {
+    await api(`/api/applications/${form.id}`, { method: "DELETE" });
+    form = null;
+    location.hash = "#/";
+  } catch (err) {
+    form.error = err.message;
+    renderForm();
+  }
+}
+
+// ---------- Recherche d'offres ----------
+
+const search = { params: { q: "", location: "", department: "", kind: "emploi" }, data: null, loading: false, error: "" };
+let found = [];
+
+function showOfferSearch() {
+  view.className = "list";
+  rerender = renderOfferSearch;
+  renderOfferSearch();
+}
+
+function resultCard(o, i) {
+  const meta = [o.company, o.location, o.contract_type, o.salary, o.published].filter(Boolean).join(" · ");
+  return `<section class="card"><div class="card-head"><h2>${esc(o.title)}</h2><span class="meta">${esc(o.source)}</span></div>
+    <div class="card-body">
+      ${meta ? `<p class="meta">${esc(meta)}</p>` : ""}
+      ${o.description || o.snippet ? `<p class="prose scroll">${esc(o.description || o.snippet)}</p>` : ""}
+      <div class="actions">
+        <a class="btn" href="${esc(o.url)}" target="_blank" rel="noopener">${t("search.view")}</a>
+        <button class="btn btn-accent" type="button" data-track="${i}">${t("search.track")}</button>
+      </div>
+    </div></section>`;
+}
+
+function renderOfferSearch() {
+  const p = search.params;
+  const d = search.data;
+  let results = "";
+  if (d) {
+    found = [...d.offers.map((o) => ({ ...o, source: "France Travail" })), ...d.web.map((o) => ({ ...o, source: hostOf(o.url) }))];
+    const notes = [d.error && t("search.ftError", { error: d.error }), d.web_error && t("search.webError", { error: d.web_error })].filter(Boolean);
+    results = `
+      <p class="links">${t("search.alsoOn")} ${d.links.map((l) => `<a class="link" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)}</a>`).join("")}</p>
+      ${notes.map((n) => `<p class="banner neutral">${esc(n)}</p>`).join("")}
+      <div class="results">${found.map(resultCard).join("") || `<p class="empty">${t("search.none")}</p>`}</div>`;
+  }
+  view.innerHTML = `
+    <h1>${t("nav.offers")}</h1>
+    <form class="mod" id="search-form"><div class="mod-body"><div class="fields">
+      ${input("q", t("search.keywords"), { value: p.q, ph: t("ph.keywords") })}
+      ${input("location", t("search.location"), { value: p.location, ph: "Lyon" })}
+      ${input("department", t("search.department"), { value: p.department, ph: "69", attrs: 'maxlength="3"' })}
+      <label class="lbl"><span>${t("search.kind")}</span><select class="field" data-key="kind">
+        ${["emploi", "stage", "alternance"].map((k) => `<option value="${k}" ${k === p.kind ? "selected" : ""}>${t("kind." + k)}</option>`).join("")}
+      </select></label>
+      <button class="btn btn-primary" type="submit" ${search.loading ? "disabled" : ""}>${t("search.submit")}</button>
+    </div></div></form>
+    ${search.loading ? `<div class="banner loading" role="status"><span>${t("search.loading")}</span><div class="progress"></div></div>` : ""}
+    ${search.error ? `<p class="banner error" role="status">${esc(search.error)}</p>` : ""}
+    ${results}`;
+
+  view.oninput = view.onchange = (e) => {
+    if (e.target.dataset.key) p[e.target.dataset.key] = e.target.value;
+  };
+  view.onsubmit = async (e) => {
+    e.preventDefault();
+    Object.assign(search, { loading: true, error: "" });
+    renderOfferSearch();
+    try {
+      search.data = await api(`/api/jobs?${new URLSearchParams(p)}`);
+    } catch (err) {
+      search.error = err.message;
+    }
+    search.loading = false;
+    if (location.hash.startsWith("#/offers")) renderOfferSearch();
+  };
+  view.onclick = (e) => {
+    const track = e.target.closest("[data-track]");
+    if (!track) return;
+    const o = found[track.dataset.track];
+    prefill = { company: o.company || "", jobTitle: o.title, url: o.url, rawText: o.description || "" };
+    location.hash = "#/new";
+  };
 }
 
 function hostOf(url) {
@@ -209,362 +798,5 @@ function hostOf(url) {
   }
 }
 
-document.addEventListener("click", async (e) => {
-  const save = e.target.dataset?.save;
-  const letter = e.target.dataset?.letter;
-  if (save !== undefined) {
-    const o = offerStore[save];
-    try {
-      await api("/api/applications", {
-        method: "POST",
-        body: {
-          title: o.title, company: o.company || "", contract_type: o.contract_type || "", location: o.location || "",
-          url: o.url, offer_text: o.description || "",
-        },
-      });
-      e.target.textContent = "Suivie ✓";
-      e.target.disabled = true;
-      toast("Ajoutée au suivi des candidatures.");
-    } catch (err) {
-      toast(err.message);
-    }
-  } else if (letter !== undefined) {
-    const o = offerStore[letter];
-    $("#letter-offer").value = [o.title, o.location, "", o.description || o.snippet || "", "", o.url].join("\n").trim();
-    $("#letter-company").value = o.company || "";
-    switchTab("letter");
-    toast("Astuce : colle le texte complet de l'offre pour une lettre plus précise.");
-  }
-});
-
-// ---------- Recherche d'offres ----------
-
-$("#jobs-form").onsubmit = (e) => {
-  e.preventDefault();
-  const params = new URLSearchParams(new FormData(e.target));
-  withBusy(e.submitter, async () => {
-    const data = await api(`/api/jobs?${params}`);
-    $("#jobs-links").innerHTML =
-      "<span class='meta'>Rechercher aussi sur :</span>" +
-      data.links.map((l) => `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.name)} ↗</a>`).join("");
-
-    let html = "";
-    if (data.offers.length) {
-      html += `<h2>France Travail (${data.offers.length})</h2>` + data.offers.map((o) => offerCard({ ...o, source: "France Travail" })).join("");
-    } else if (data.error) {
-      html += `<p class="meta">France Travail indisponible : ${escapeHtml(data.error)}</p>`;
-    }
-    if (data.web.length) {
-      html += `<h2>Sur le web (${data.web.length})</h2>` + data.web.map((o) => offerCard({ ...o, source: "web" })).join("");
-    } else if (data.web_error) {
-      html += `<p class="meta">Recherche web indisponible : ${escapeHtml(data.web_error)}</p>`;
-    }
-    $("#jobs-results").innerHTML =
-      html || "<p class='meta'>Aucune offre trouvée. Essaie d'autres mots-clés, ou demande à l'assistant de chercher pour toi.</p>";
-  });
-};
-
-// ---------- CV & lettre ----------
-
-$("#letter-btn").onclick = (e) =>
-  withBusy(e.target, async () => {
-    const { text } = await api("/api/letter", {
-      method: "POST",
-      body: { offer: $("#letter-offer").value, company: $("#letter-company").value, extra: $("#letter-extra").value },
-    });
-    showOutput($("#letter-output"), text);
-  });
-
-$("#cv-btn").onclick = (e) =>
-  withBusy(e.target, async () => {
-    const { text } = await api("/api/cv-review", { method: "POST", body: { offer: $("#letter-offer").value } });
-    showOutput($("#letter-output"), text);
-  });
-
-// ---------- E-mails ----------
-
-$("#email-btn").onclick = (e) =>
-  withBusy(e.target, async () => {
-    const { text } = await api("/api/email", {
-      method: "POST",
-      body: {
-        received: $("#email-received").value,
-        goal: $("#email-goal").value,
-        tone: $("#email-tone").value,
-        extra: $("#email-extra").value,
-      },
-    });
-    showOutput($("#email-output"), text);
-  });
-
-// ---------- Suivi des candidatures ----------
-
-let applications = [];
-
-async function loadApplications() {
-  try {
-    applications = await api("/api/applications");
-  } catch (err) {
-    toast(err.message);
-    return;
-  }
-  const select = $("#reply-form").elements.application_id;
-  const chosen = select.value;
-  select.innerHTML =
-    '<option value="">Détecter automatiquement</option>' +
-    applications
-      .map((a) => `<option value="${a.id}">${escapeHtml(a.title)}${a.company ? " — " + escapeHtml(a.company) : ""}</option>`)
-      .join("");
-  select.value = chosen;
-
-  const counts = {};
-  applications.forEach((a) => (counts[a.status] = (counts[a.status] || 0) + 1));
-  $("#tracker-summary").innerHTML =
-    `<span>Total : ${applications.length}</span>` +
-    Object.entries(STATUS_LABELS)
-      .filter(([k]) => counts[k])
-      .map(([k, label]) => `<span>${label} : ${counts[k]}</span>`)
-      .join("");
-
-  const today = new Date().toISOString().slice(0, 10);
-  $("#tracker-list").innerHTML = applications.length
-    ? applications
-        .map((a) => {
-          const late = a.next_action_on && a.next_action_on <= today && !["offre", "refuse"].includes(a.status);
-          return `
-      <div class="card" data-id="${a.id}">
-        <h3>${escapeHtml(a.title)}${a.company ? " — " + escapeHtml(a.company) : ""}${a.prep ? '<span class="badge">Préparation prête</span>' : ""}</h3>
-        <div class="meta">${escapeHtml([a.contract_type, a.location, a.contact].filter(Boolean).join(" · "))}</div>
-        <div class="meta">
-          ${a.applied_on ? "Postulé le " + escapeHtml(a.applied_on) : "Ajouté le " + escapeHtml(a.created_on)}
-          ${a.next_action_on ? ` · <span class="${late ? "late" : ""}">Prochaine action : ${escapeHtml(a.next_action_on)}</span>` : ""}
-        </div>
-        ${a.notes ? `<div class="desc">${escapeHtml(a.notes)}</div>` : ""}
-        <div class="actions">
-          <select data-field="status">
-            ${Object.entries(STATUS_LABELS)
-              .map(([k, label]) => `<option value="${k}" ${k === a.status ? "selected" : ""}>${label}</option>`)
-              .join("")}
-          </select>
-          ${a.url ? `<a href="${escapeHtml(a.url)}" target="_blank" rel="noopener"><button class="small secondary" type="button">Offre</button></a>` : ""}
-          <button class="small" data-action="open">Fiche &amp; préparation</button>
-          <button class="small secondary" data-action="followup">Rédiger une relance</button>
-          <button class="small secondary" data-action="notes">Notes</button>
-          <button class="small danger" data-action="delete">Supprimer</button>
-        </div>
-      </div>`;
-        })
-        .join("")
-    : "<p class='meta'>Aucune candidature pour l'instant. Ajoute-en une ou suis une offre depuis l'onglet Offres.</p>";
-}
-
-$("#tracker-list").onchange = async (e) => {
-  if (e.target.dataset.field !== "status") return;
-  const id = e.target.closest(".card").dataset.id;
-  const body = { status: e.target.value };
-  const app = applications.find((a) => String(a.id) === id);
-  if (body.status === "postule" && app && !app.applied_on) body.applied_on = new Date().toISOString().slice(0, 10);
-  try {
-    await api(`/api/applications/${id}`, { method: "PATCH", body });
-    loadApplications();
-  } catch (err) {
-    toast(err.message);
-  }
-};
-
-$("#tracker-list").onclick = async (e) => {
-  const action = e.target.dataset.action;
-  if (!action) return;
-  const id = e.target.closest(".card").dataset.id;
-  const app = applications.find((a) => String(a.id) === id);
-  try {
-    if (action === "delete") {
-      if (!confirm("Supprimer cette candidature ?")) return;
-      await api(`/api/applications/${id}`, { method: "DELETE" });
-      loadApplications();
-    } else if (action === "open") {
-      openApplication(id);
-    } else if (action === "notes") {
-      const notes = prompt("Notes :", app.notes);
-      if (notes === null) return;
-      await api(`/api/applications/${id}`, { method: "PATCH", body: { notes } });
-      loadApplications();
-    } else if (action === "followup") {
-      $("#email-received").value =
-        `Candidature au poste « ${app.title} »${app.company ? " chez " + app.company : ""}` +
-        `${app.applied_on ? ", envoyée le " + app.applied_on : ""}.` +
-        `${app.contact ? "\nContact : " + app.contact : ""}${app.notes ? "\nNotes : " + app.notes : ""}`;
-      $("#email-goal").value = "followup";
-      switchTab("email");
-    }
-  } catch (err) {
-    toast(err.message);
-  }
-};
-
-$("#app-form").onsubmit = async (e) => {
-  e.preventDefault();
-  const body = Object.fromEntries(new FormData(e.target));
-  body.status = body.applied_on ? "postule" : "a_postuler";
-  try {
-    await api("/api/applications", { method: "POST", body });
-    e.target.reset();
-    toast("Candidature ajoutée.");
-    loadApplications();
-  } catch (err) {
-    toast(err.message);
-  }
-};
-
-// ---------- Réponse d'un recruteur ----------
-
-const REPLY_LABELS = {
-  entretien: "Invitation à un entretien",
-  test: "Test / étude de cas",
-  offre: "Proposition d'embauche",
-  refus: "Réponse négative",
-  demande_infos: "Demande d'informations",
-  autre: "Autre réponse",
-};
-
-$("#reply-form").onsubmit = (e) => {
-  e.preventDefault();
-  const form = e.target;
-  const body = {
-    message: form.elements.message.value,
-    application_id: form.elements.application_id.value ? Number(form.elements.application_id.value) : null,
-    offer_text: form.elements.offer_text.value,
-  };
-  withBusy(e.submitter, async () => {
-    $("#reply-result").innerHTML = "<p class='meta'>Analyse du message, recherches sur l'entreprise et préparation en cours (jusqu'à une minute)…</p>";
-    try {
-      const { application: a, analysis, created, steps, prep_error } = await api("/api/recruiter-reply", { method: "POST", body });
-      const when = [analysis.date_entretien, analysis.heure].filter(Boolean).join(" à ");
-      $("#reply-result").innerHTML = `
-        <div class="card">
-          <h3>${escapeHtml(REPLY_LABELS[analysis.type_reponse] || "Réponse")} — ${escapeHtml(a.title)}${a.company ? " · " + escapeHtml(a.company) : ""}</h3>
-          <div class="meta">Fiche ${created ? "créée" : "mise à jour"} · statut : ${escapeHtml(STATUS_LABELS[a.status] || a.status)}${when ? " · " + escapeHtml(when) : ""}${analysis.format ? " · " + escapeHtml(analysis.format) : ""}</div>
-          ${analysis.resume ? `<div class="desc">${escapeHtml(analysis.resume)}</div>` : ""}
-          ${analysis.a_faire ? `<div class="desc"><strong>À faire :</strong> ${escapeHtml(analysis.a_faire)}</div>` : ""}
-          ${prep_error ? `<div class="desc late">Préparation non générée : ${escapeHtml(prep_error)} Tu pourras la relancer depuis la fiche.</div>` : ""}
-          ${steps.length ? `<div class="steps">${steps.map((s) => `<div>🔎 ${escapeHtml(s)}</div>`).join("")}</div>` : ""}
-          <div class="actions"><button class="small" type="button" data-action="open-reply" data-id="${a.id}">Ouvrir la fiche${a.prep ? " et la préparation" : ""}</button></div>
-        </div>`;
-      form.reset();
-      loadApplications();
-      if (a.prep) openApplication(a.id);
-    } catch (err) {
-      $("#reply-result").innerHTML = "";
-      throw err;
-    }
-  });
-};
-
-$("#reply-result").onclick = (e) => {
-  if (e.target.dataset.action === "open-reply") openApplication(e.target.dataset.id);
-};
-
-// ---------- Fiche détaillée d'une candidature ----------
-
-let currentApp = null;
-
-function renderApplication(a) {
-  currentApp = a;
-  $("#dlg-title").textContent = a.title + (a.company ? " — " + a.company : "");
-  $("#dlg-meta").textContent = [
-    STATUS_LABELS[a.status] || a.status,
-    a.contract_type,
-    a.location,
-    a.contact,
-    a.next_action_on && "Prochaine étape : " + a.next_action_on,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  $("#dlg-prepare").textContent = a.prep ? "Régénérer la préparation" : "Générer la préparation";
-  $("#dlg-reply").hidden = !a.events?.length;
-  $("#dlg-offer").value = a.offer_text || "";
-  const prep = $("#dlg-prep");
-  prep.innerHTML = "";
-  if (a.prep) {
-    const copy = document.createElement("button");
-    copy.className = "secondary small copy-btn";
-    copy.textContent = "Copier";
-    copy.onclick = () => navigator.clipboard.writeText(a.prep).then(() => toast("Copié !"));
-    const body = document.createElement("div");
-    body.innerHTML = `<div class="meta">Préparation du ${escapeHtml(a.prep_updated_on)}</div>` + renderMarkdown(a.prep);
-    prep.append(copy, body);
-  }
-  $("#dlg-events").innerHTML = a.events?.length
-    ? a.events
-        .map(
-          (ev) => `
-      <div class="card">
-        <div class="meta">${escapeHtml(ev.date)} · ${escapeHtml(REPLY_LABELS[ev.kind.replace("reponse_", "")] || ev.kind)}</div>
-        <div class="desc">${escapeHtml(ev.summary)}</div>
-        <details><summary>Message complet</summary><div class="desc">${escapeHtml(ev.content)}</div></details>
-      </div>`
-        )
-        .join("")
-    : "<p class='meta'>Aucun échange enregistré. Colle les réponses du recruteur dans le bloc « J'ai reçu une réponse ».</p>";
-}
-
-async function openApplication(id) {
-  try {
-    renderApplication(await api(`/api/applications/${id}`));
-    $("#dlg-steps").innerHTML = "";
-    if (!$("#app-dialog").open) $("#app-dialog").showModal();
-  } catch (err) {
-    toast(err.message);
-  }
-}
-
-$("#dlg-close").onclick = () => $("#app-dialog").close();
-
-$("#dlg-prepare").onclick = (e) =>
-  withBusy(e.target, async () => {
-    $("#dlg-steps").innerHTML = "<div>Recherches sur l'entreprise et analyse des compétences en cours…</div>";
-    try {
-      const { application, steps } = await api(`/api/applications/${currentApp.id}/prepare`, { method: "POST" });
-      renderApplication({ ...application, events: currentApp.events });
-      $("#dlg-steps").innerHTML = steps.map((s) => `<div>🔎 ${escapeHtml(s)}</div>`).join("");
-      loadApplications();
-    } catch (err) {
-      $("#dlg-steps").innerHTML = "";
-      throw err;
-    }
-  });
-
-$("#dlg-offer-save").onclick = async () => {
-  try {
-    const updated = await api(`/api/applications/${currentApp.id}`, { method: "PATCH", body: { offer_text: $("#dlg-offer").value } });
-    currentApp = { ...updated, events: currentApp.events };
-    toast("Fiche de poste enregistrée. Régénère la préparation pour en tenir compte.");
-  } catch (err) {
-    toast(err.message);
-  }
-};
-
-$("#dlg-reply").onclick = () => {
-  const last = currentApp.events[0];
-  $("#email-received").value = last.content;
-  $("#email-goal").value = ["reponse_entretien", "reponse_test", "reponse_offre"].includes(last.kind) ? "accept" : "reply";
-  $("#app-dialog").close();
-  switchTab("email");
-};
-
-// ---------- Profil ----------
-
-api("/api/profile").then((p) => {
-  const form = $("#profile-form");
-  Object.entries(p).forEach(([k, v]) => form.elements[k] && (form.elements[k].value = v));
-});
-
-$("#profile-form").onsubmit = async (e) => {
-  e.preventDefault();
-  try {
-    await api("/api/profile", { method: "PUT", body: Object.fromEntries(new FormData(e.target)) });
-    toast("Profil enregistré.");
-  } catch (err) {
-    toast(err.message);
-  }
-};
+route();
+if (location.hash.split("/")[1]) loadApps().catch(() => {}); // Box charge déjà la liste

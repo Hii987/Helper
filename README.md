@@ -1,17 +1,15 @@
-# Helper — assistant emploi, stage & alternance
+# Helper — Job search center
 
-Application web locale qui t'aide à chercher un emploi, un stage ou une alternance, avec une IA gratuite (**Groq**).
+Application web locale pour suivre ses candidatures (emploi, stage, alternance). Interface en anglais ou en français (bouton EN / FR dans la barre latérale).
 
 ## Fonctionnalités
 
-| Onglet | Ce que ça fait |
+| Page | Ce que ça fait |
 |---|---|
-| **Assistant** | Discussion avec l'IA, personnalisée avec ton profil. **Elle va chercher elle-même sur internet** : offres (Indeed, HelloWork, Welcome to the Jungle, France Travail, LinkedIn…), entreprises qui recrutent, salaires, écoles… Elle peut aussi lire une page d'offre pour en résumer le contenu. Les offres trouvées s'affichent avec des boutons « Suivre » et « Lettre de motivation ». |
-| **Offres** | Recherche d'offres d'emploi / stage / alternance sur le web et via l'API gratuite de France Travail, + liens directs vers Indeed, Welcome to the Jungle, LinkedIn, La bonne alternance, 1jeune1solution. Un clic pour suivre une offre ou générer la lettre de motivation. |
-| **CV & lettre** | Génère une lettre de motivation adaptée à une offre, ou analyse ton CV (points forts, améliorations, mots-clés manquants). |
-| **E-mails** | Rédige la réponse à un mail de recruteur : répondre, accepter un entretien, décliner, relancer, remercier — avec le ton choisi. |
-| **Candidatures** | Suivi de tes candidatures (statut, dates, contact, notes), avec mise en évidence des relances en retard et bouton « Rédiger une relance ». **Colle la réponse d'un recruteur** : la fiche de suivi est créée ou mise à jour automatiquement, et une préparation d'entretien est générée (voir ci-dessous). |
-| **Profil** | Ton objectif, tes compétences et ton CV, utilisés par l'IA. Stocké localement (SQLite). |
+| **Box** | Liste des candidatures, triée par date du dernier changement de statut, filtrable par statut (Not sent, Sent, Positive response, Refused). |
+| **Candidature** | Page de lecture pensée pour répondre à un recruteur : points clés de l'offre d'abord (ou l'e-mail envoyé pour une candidature spontanée), puis l'offre, le CV, le contact, l'e-mail, la lettre. |
+| **Création / modification** | Deux types : à une offre ou spontanée. Seules les bases sont obligatoires ; les sections (lien de l'offre, points clés, CV, lettre, e-mail, contact, section libre) s'ajoutent, se retirent et se réordonnent. **« Fetch and summarize »** lit la page de l'offre et l'IA (**Groq**) remplit les points clés ; un champ inconnu reste vide. |
+| **Offer search** | Recherche d'offres sur le web et via l'API France Travail ; « Track » crée une candidature à partir d'une offre. |
 
 ## Installation
 
@@ -27,47 +25,23 @@ uvicorn app.main:app --reload
 
 Ouvre ensuite http://localhost:8000.
 
+### Firestore (gratuit, plan Spark)
+
+Les candidatures et les PDF sont stockés dans Firestore. Les PDF sont découpés en morceaux de 900 Ko (un document par morceau) : pas besoin de Cloud Storage, qui exige le plan payant.
+
+1. Crée un projet dédié sur https://console.firebase.google.com (chaque projet a son propre quota gratuit).
+2. *Build → Firestore Database → Create database* (mode production).
+3. *Paramètres du projet → Comptes de service → Générer une nouvelle clé privée* : garde le fichier JSON hors du dépôt.
+4. Dans `.env` : `FIREBASE_PROJECT_ID=<id du projet>` et `GOOGLE_APPLICATION_CREDENTIALS=<chemin du JSON>`.
+
 ### Clé Groq (gratuite)
 
-1. Crée un compte sur https://console.groq.com
-2. Crée une clé dans *API Keys* (https://console.groq.com/keys).
-3. Mets-la dans `.env` : `GROQ_API_KEY=...`
-
-Le modèle par défaut est `openai/gpt-oss-120b` (modifiable via `GROQ_MODEL`, voir https://console.groq.com/docs/models).
-
-Le plan gratuit limite le débit (environ 30 requêtes par minute) et le volume de tokens. L'appli s'y adapte :
-elle espace ses requêtes, réessaie automatiquement en cas de limite atteinte, raccourcit le CV et l'historique
-envoyés, et affiche sous chaque réponse le nombre de tokens utilisés. Ta consommation est visible sur
-https://console.groq.com/settings/limits.
+1. Crée une clé sur https://console.groq.com/keys.
+2. Mets-la dans `.env` : `GROQ_API_KEY=...` (modèle modifiable via `GROQ_MODEL`).
 
 ### API France Travail (optionnelle, gratuite)
 
-Sans elle, l'assistant et l'onglet Offres cherchent quand même sur le web ; l'API ajoute des offres officielles plus détaillées (salaire, description complète).
-
-1. Crée un compte sur https://francetravail.io et une application.
-2. Abonne l'application à l'API **« Offres d'emploi v2 »**.
-3. Copie l'identifiant et la clé secrète dans `.env` (`FRANCE_TRAVAIL_CLIENT_ID`, `FRANCE_TRAVAIL_CLIENT_SECRET`).
-
-## Comment l'assistant cherche sur internet
-
-L'IA (Groq) utilise des « outils » (function calling) qu'elle appelle quand elle en a besoin :
-
-- `rechercher_offres_web` : recherche DuckDuckGo ciblée sur les sites d'offres (gratuit, sans clé) ;
-- `rechercher_offres_france_travail` : API officielle (si les identifiants sont configurés) ;
-- `recherche_web` : recherche générale (entreprises, salaires, formations…) ;
-- `lire_page` : lit le contenu d'une page (par exemple le détail d'une offre).
-
-Les étapes de recherche s'affichent dans la conversation (🔎). L'IA a pour consigne de ne citer que des offres et des liens réellement trouvés.
-
-## Réponses de recruteurs et préparation d'entretien
-
-Dans l'onglet **Candidatures**, le bloc « J'ai reçu une réponse d'un recruteur » prend le mail tel quel :
-
-1. **Analyse du message** : type de réponse (entretien, test, offre, refus, demande d'informations), date et heure, format, contact, action attendue.
-2. **Fiche de suivi** : la candidature correspondante est retrouvée d'après le nom de l'entreprise (ou créée si elle n'existe pas), son statut, sa prochaine échéance et son contact sont mis à jour, et le message est ajouté à l'historique des échanges.
-3. **Préparation d'entretien** (sauf en cas de refus) : l'appli lit la fiche de poste (texte collé, ou page de l'offre via son lien), fait des recherches web sur l'entreprise, puis l'IA produit une fiche avec la situation, une présentation sourcée de l'entreprise, une **analyse détaillée de chaque compétence demandée** (niveau attendu, ton niveau d'après ton profil, exemple concret à raconter, questions probables, plan de mise à niveau si besoin), un taux d'adéquation, ton pitch, les questions probables et à poser, et une checklist.
-
-Chaque candidature a une fiche détaillée (bouton « Fiche & préparation ») pour relire la préparation, la régénérer, compléter la fiche de poste et rédiger la réponse au dernier message.
+Sans elle, Offer search cherche quand même sur le web. Crée une application sur https://francetravail.io, abonne-la à l'API **« Offres d'emploi v2 »** et copie ses identifiants dans `.env`.
 
 ## Tests
 
@@ -79,18 +53,17 @@ pytest
 
 ```
 app/
-  main.py     # routes FastAPI
-  llm.py      # client Groq
-  prompts.py  # prompts (chat, lettre, CV, e-mails, réponses recruteurs, préparation)
-  agent.py    # assistant avec outils de recherche (function calling)
+  main.py      # routes FastAPI
+  store.py     # Firestore : candidatures et fichiers
+  offer.py     # lecture d'une offre + résumé en points clés par l'IA
+  llm.py       # client Groq
   websearch.py # recherche web (DuckDuckGo) et lecture de pages
-  jobs.py     # recherche d'offres France Travail + liens externes
-  tracking.py # réponses de recruteurs → fiche de suivi + préparation d'entretien
-  db.py       # SQLite : profil, candidatures et historique des échanges
-static/       # interface web (HTML/CSS/JS sans dépendance)
+  jobs.py      # offres France Travail + liens externes
+static/        # interface web (HTML/CSS/JS sans dépendance, textes dans i18n.js)
 tests/
+deprecated/    # ancien assistant, lettres, e-mails, préparation d'entretien (non branché, gardé pour réutilisation)
 ```
 
 ## Confidentialité
 
-Les données (profil, candidatures) restent dans le fichier `helper.db` sur ta machine. Le contenu de ton profil et les textes que tu soumets sont envoyés à Groq uniquement au moment d'une requête à l'IA.
+Les candidatures et fichiers sont dans ton projet Firebase. Le texte d'une offre est envoyé à Groq uniquement quand tu cliques sur « Fetch and summarize ».

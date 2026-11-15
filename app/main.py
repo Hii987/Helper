@@ -1,147 +1,177 @@
-"""Helper : assistant de recherche d'emploi, de stage et d'alternance."""
+"""Helper : centre de suivi des candidatures."""
 
 import asyncio
-from contextlib import asynccontextmanager
+import io
 from pathlib import Path
+from typing import Literal
+from urllib.parse import quote
 
+import pypdfium2 as pdfium
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 load_dotenv()
 
-from . import agent, db, jobs, llm, prompts, tracking, websearch  # noqa: E402  (après load_dotenv)
+from . import jobs, llm, offer, store, websearch  # noqa: E402  (après load_dotenv)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+MAX_FILE_BYTES = 10_000_000
+SECTION_KINDS = {"offerLink", "keyPoints", "cv", "letter", "email", "contact", "custom"}
+OFFER_KINDS = {"offerLink", "keyPoints"}
 
-
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    db.init_db()
-    yield
-
-
-app = FastAPI(title="Helper", lifespan=lifespan)
+app = FastAPI(title="Helper")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-# ---------- Modèles ----------
-
-class Profile(BaseModel):
-    name: str = ""
-    target: str = ""
-    location: str = ""
-    skills: str = ""
-    cv: str = ""
+class ApplicationIn(BaseModel):
+    type: Literal["regular", "spontaneous"]
+    company: str
+    jobTitle: str = ""
+    status: Literal["notsent", "sent", "positive", "refused"]
+    sections: list[dict] = []
 
 
-class ChatRequest(BaseModel):
-    messages: list[dict]
-
-
-class LetterRequest(BaseModel):
-    offer: str
-    company: str = ""
-    extra: str = ""
-
-
-class CvRequest(BaseModel):
-    offer: str = ""
-
-
-class EmailRequest(BaseModel):
-    received: str = ""
-    goal: str = "reply"
-    tone: str = ""
-    extra: str = ""
-
-
-class Application(BaseModel):
-    title: str = ""
-    company: str = ""
-    contract_type: str = ""
-    location: str = ""
+class OfferRequest(BaseModel):
     url: str = ""
-    status: str = "a_postuler"
-    applied_on: str = ""
-    next_action_on: str = ""
-    contact: str = ""
-    notes: str = ""
-    offer_text: str = ""
+    text: str = ""
 
-
-class RecruiterReply(BaseModel):
-    message: str
-    application_id: int | None = None
-    offer_text: str = ""
-    prepare: bool = True
-
-
-# ---------- Routes ----------
 
 @app.get("/")
 def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
-@app.get("/api/status")
-def status():
-    return {"llm": llm.is_configured(), "france_travail": jobs.is_configured()}
+# ---------- Candidatures ----------
+
+def _validate(data: ApplicationIn) -> None:
+    if not data.company.strip():
+        raise HTTPException(status_code=400, detail="Company is required.")
+    for section in data.sections:
+        kind = section.get("kind")
+        if kind not in SECTION_KINDS:
+            raise HTTPException(status_code=400, detail=f"Unknown section: {kind}")
+        if data.type == "spontaneous" and kind in OFFER_KINDS:
+            raise HTTPException(status_code=400, detail="A spontaneous application has no job offer.")
 
 
-@app.get("/api/profile")
-def get_profile():
-    return db.get_profile()
+def _file_ids(sections: list[dict]) -> set[str]:
+    return {s["file"]["id"] for s in sections if (s.get("file") or {}).get("id")}
 
 
-@app.put("/api/profile")
-def put_profile(profile: Profile):
-    return db.save_profile(profile.model_dump())
+@app.get("/api/applications")
+def list_applications():
+    return store.list_applications()
 
 
-async def _ask(messages: list[dict], temperature: float = 0.5) -> dict:
+@app.get("/api/applications/{app_id}")
+def get_application(app_id: str):
+    application = store.get_application(app_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    return application
+
+
+@app.post("/api/applications", status_code=201)
+def create_application(data: ApplicationIn):
+    _validate(data)
+    now = store.now()
+    record = {**data.model_dump(), "createdAt": now, "lastStatusChangeAt": now}
+    if data.status != "notsent":
+        record["sentAt"] = now
+    return store.create_application(record)
+
+
+@app.put("/api/applications/{app_id}")
+def update_application(app_id: str, data: ApplicationIn):
+    _validate(data)
+    old = get_application(app_id)
+    if data.type != old["type"]:
+        raise HTTPException(status_code=400, detail="The type of an application cannot change.")
+    record = {k: v for k, v in old.items() if k != "id"} | data.model_dump()
+    if data.status != old["status"]:
+        record["lastStatusChangeAt"] = store.now()
+        if data.status != "notsent" and not old.get("sentAt"):
+            record["sentAt"] = record["lastStatusChangeAt"]
+    saved = store.update_application(app_id, record)
+    for file_id in _file_ids(old["sections"]) - _file_ids(data.sections):
+        store.delete_file(file_id)
+    return saved
+
+
+@app.delete("/api/applications/{app_id}", status_code=204)
+def delete_application(app_id: str):
+    application = get_application(app_id)
+    for file_id in _file_ids(application["sections"]):
+        store.delete_file(file_id)
+    store.delete_application(app_id)
+
+
+# ---------- Fichiers PDF ----------
+
+def _read_pdf(content: bytes) -> tuple[int, bytes]:
+    """Renvoie le nombre de pages et un aperçu PNG de la première page."""
     try:
-        return {"text": await llm.chat(messages, temperature)}
+        pdf = pdfium.PdfDocument(content)
+    except pdfium.PdfiumError as exc:
+        raise HTTPException(status_code=400, detail="This file is not a valid PDF.") from exc
+    page = pdf[0]
+    image = page.render(scale=224 / page.get_width()).to_pil()
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    return len(pdf), buffer.getvalue()
+
+
+@app.post("/api/files", status_code=201)
+async def upload_file(request: Request, name: str):
+    content = await request.body()
+    if len(content) > MAX_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="The file is larger than 10 MB.")
+    pages, preview = _read_pdf(content)
+    meta = {"name": name, "pages": pages, "addedAt": store.now()}
+    file_id = store.save_file({**meta, "preview": preview}, content)
+    return {**meta, "id": file_id}
+
+
+@app.get("/api/files/{file_id}")
+def download_file(file_id: str, download: bool = False):
+    found = store.get_file(file_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="File not found.")
+    meta, content = found
+    disposition = "attachment" if download else "inline"
+    return Response(content, media_type="application/pdf",
+                    headers={"Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(meta['name'])}"})
+
+
+@app.get("/api/files/{file_id}/preview")
+def file_preview(file_id: str):
+    meta = store.get_file_meta(file_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="File not found.")
+    return Response(meta["preview"], media_type="image/png")
+
+
+# ---------- Offres ----------
+
+@app.post("/api/offer/summary")
+async def summarize_offer(req: OfferRequest):
+    if not req.url.strip() and not req.text.strip():
+        raise HTTPException(status_code=400, detail="Give a link or paste the offer text.")
+    try:
+        return await offer.summarize(req.url, req.text)
+    except websearch.WebSearchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except llm.LLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
-@app.post("/api/chat")
-async def chat(req: ChatRequest):
-    try:
-        return await agent.run(db.get_profile(), req.messages)
-    except llm.LLMError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
-@app.post("/api/letter")
-async def cover_letter(req: LetterRequest):
-    if not req.offer.strip():
-        raise HTTPException(status_code=400, detail="Colle le texte de l'offre.")
-    return await _ask(prompts.cover_letter_messages(db.get_profile(), req.offer, req.company, req.extra))
-
-
-@app.post("/api/cv-review")
-async def cv_review(req: CvRequest):
-    profile = db.get_profile()
-    if not profile["cv"].strip():
-        raise HTTPException(status_code=400, detail="Ajoute d'abord ton CV dans l'onglet Profil.")
-    return await _ask(prompts.cv_review_messages(profile, req.offer), 0.4)
-
-
-@app.post("/api/email")
-async def email(req: EmailRequest):
-    if req.goal not in prompts.EMAIL_GOALS:
-        raise HTTPException(status_code=400, detail="Objectif d'e-mail inconnu.")
-    return await _ask(prompts.email_messages(db.get_profile(), req.received, req.goal, req.tone, req.extra))
 
 
 @app.get("/api/jobs")
 async def search_jobs(q: str = "", location: str = "", department: str = "", kind: str = "emploi"):
     if kind not in jobs.KINDS:
-        raise HTTPException(status_code=400, detail="Type de contrat inconnu.")
+        raise HTTPException(status_code=400, detail="Unknown contract type.")
     result = {
         "offers": [], "error": None,
         "web": [], "web_error": None,
@@ -164,72 +194,3 @@ async def search_jobs(q: str = "", location: str = "", department: str = "", kin
 
     await asyncio.gather(from_france_travail(), from_web())
     return result
-
-
-@app.get("/api/applications")
-def list_applications():
-    return db.list_applications()
-
-
-@app.post("/api/applications", status_code=201)
-def create_application(application: Application):
-    return db.create_application(application.model_dump())
-
-
-@app.get("/api/applications/{app_id}")
-def get_application(app_id: int):
-    application = db.get_application(app_id)
-    if application is None:
-        raise HTTPException(status_code=404, detail="Candidature introuvable.")
-    return application | {"events": db.list_events(app_id)}
-
-
-@app.post("/api/recruiter-reply")
-async def recruiter_reply(req: RecruiterReply):
-    """Message d'un recruteur → fiche de suivi créée / mise à jour + préparation d'entretien."""
-    if not req.message.strip():
-        raise HTTPException(status_code=400, detail="Colle le message du recruteur.")
-    try:
-        application, info, created = await tracking.record_reply(req.message, req.application_id, req.offer_text)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except llm.LLMError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    result = {"application": application, "analysis": info, "created": created, "steps": [], "prep_error": None}
-    if req.prepare and info["type_reponse"] != "refus":
-        try:  # la fiche de suivi est déjà enregistrée : un échec ici ne doit pas la perdre
-            result["application"], result["steps"] = await tracking.prepare(
-                application["id"], tracking.situation_text(info)
-            )
-        except llm.LLMError as exc:
-            result["prep_error"] = str(exc)
-    return result
-
-
-@app.post("/api/applications/{app_id}/prepare")
-async def prepare_interview(app_id: int):
-    try:
-        application, steps = await tracking.prepare(app_id)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except llm.LLMError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"application": application, "steps": steps}
-
-
-@app.patch("/api/applications/{app_id}")
-def update_application(app_id: int, data: dict):
-    try:
-        updated = db.update_application(app_id, data)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if updated is None:
-        raise HTTPException(status_code=404, detail="Candidature introuvable.")
-    return updated
-
-
-@app.delete("/api/applications/{app_id}", status_code=204)
-def delete_application(app_id: int):
-    if not db.delete_application(app_id):
-        raise HTTPException(status_code=404, detail="Candidature introuvable.")
