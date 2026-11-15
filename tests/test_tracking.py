@@ -81,8 +81,11 @@ def test_reply_creates_application_when_unknown(client, monkeypatch):  # noqa: F
 
 def test_refusal_closes_without_preparation(client, monkeypatch):  # noqa: F811
     calls = _fake_llm(monkeypatch, {"type_reponse": "refus", "entreprise": "Acme", "resume": "Candidature non retenue."})
-    app = client.post("/api/applications", json={"title": "Data analyst", "company": "ACME", "status": "postule"}).json()
+    app = client.post("/api/applications", json={
+        "title": "Data analyst", "company": "ACME", "status": "entretien", "next_action_on": "2026-12-01",
+    }).json()
     data = client.post("/api/recruiter-reply", json={"message": "Nous sommes au regret…"}).json()
+    assert data["application"]["next_action_on"] == ""
     assert data["application"]["id"] == app["id"]
     assert data["application"]["status"] == "refuse"
     assert data["application"]["prep"] == ""
@@ -133,3 +136,30 @@ def test_old_database_is_migrated(tmp_path, monkeypatch):
     db.init_db()
     app = db.update_application(1, {"prep": "fiche", "offer_text": "SQL"})
     assert app["prep"] == "fiche" and app["title"] == "Dev"
+
+
+def test_new_interview_not_attached_to_other_closed_job():
+    apps = [{"id": 1, "company": "Groupe Decathlon Retail", "title": "Chargé de communication", "status": "refuse"}]
+    assert tracking.find_application(apps, "Decathlon", "Assistant(e) marketing digital en alternance") is None
+    # Même poste : on reprend bien la fiche, même close.
+    assert tracking.find_application(apps, "Decathlon", "Chargée de communication")["id"] == 1
+
+
+def test_ambiguous_company_with_several_open_jobs():
+    apps = [
+        {"id": 1, "company": "Capgemini", "title": "Développeur Python junior", "status": "postule"},
+        {"id": 2, "company": "Capgemini", "title": "Data engineer", "status": "postule"},
+    ]
+    assert tracking.find_application(apps, "Capgemini", "Développeur Python")["id"] == 1
+    assert tracking.find_application(apps, "Capgemini", "Chef de projet") is None
+    # Une seule candidature en cours : on la reprend même si l'intitulé diffère.
+    assert tracking.find_application(apps[:1], "Capgemini", "Software engineer")["id"] == 1
+
+
+def test_deadline_becomes_next_action(client, monkeypatch):  # noqa: F811
+    _fake_llm(monkeypatch, {"type_reponse": "test", "entreprise": "Capgemini", "poste": "Dev",
+                            "date_limite": "2026-12-03", "date_entretien": "pas une date"})
+    data = client.post("/api/recruiter-reply", json={"message": "Test à rendre avant le 3/12", "prepare": False}).json()
+    assert data["analysis"]["date_entretien"] == ""
+    assert data["application"]["next_action_on"] == "2026-12-03"
+    assert data["application"]["status"] == "entretien"

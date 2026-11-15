@@ -38,23 +38,45 @@ def _parse_json(text: str) -> dict:
     return {k: str(v).strip() for k, v in data.items() if v is not None} if isinstance(data, dict) else {}
 
 
+STOPWORDS = {"de", "du", "des", "en", "et", "la", "le", "les", "un", "une", "h", "f", "e", "a", "au", "pour"}
+
+
+def _title_similarity(a: str, b: str) -> float:
+    """Part des mots significatifs du poste le plus court présents dans l'autre (0 à 1)."""
+    wa = {w for w in _normalize(a).split() if w not in STOPWORDS}
+    wb = {w for w in _normalize(b).split() if w not in STOPWORDS}
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / min(len(wa), len(wb))
+
+
 def find_application(applications: list[dict], company: str, title: str) -> dict | None:
-    """Retrouve la candidature qui correspond le mieux à l'entreprise (et au poste)."""
+    """Retrouve la candidature qui correspond le mieux à l'entreprise (et au poste).
+
+    Une candidature close (refus, offre) n'est reprise que si le poste correspond aussi :
+    une nouvelle invitation chez la même entreprise concerne souvent un autre poste.
+    Si le poste est connu et ne correspond à aucune candidature de l'entreprise,
+    on ne rattache qu'à une candidature en cours unique.
+    """
     target = _normalize(company)
     if not target:
         return None
-    best, best_score = None, 0
+    candidates = []
     for app in applications:
         name = _normalize(app.get("company", ""))
         if not name or not (name == target or name in target or target in name):
             continue
-        score = 2 if name == target else 1
-        if title and _normalize(title) and _normalize(title) in _normalize(app.get("title", "")):
-            score += 1
-        if app.get("status") not in CLOSED:
-            score += 1
-        if score > best_score:
-            best, best_score = app, score
+        same_title = bool(title) and _title_similarity(title, app.get("title", "")) >= 0.5
+        if app.get("status") in CLOSED and not same_title:
+            continue
+        score = (2 if name == target else 1) + (2 if same_title else 0) + (1 if app.get("status") not in CLOSED else 0)
+        candidates.append((score, same_title, app))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: c[0], reverse=True)
+    score, same_title, best = candidates[0]
+    if title and not same_title and len(candidates) > 1:
+        return None  # plusieurs candidatures en cours, aucune pour ce poste : on ne devine pas
     return best
 
 
@@ -69,8 +91,9 @@ async def analyze_reply(message: str) -> dict:
     info = _parse_json(raw)
     if info.get("type_reponse") not in prompts.REPLY_TYPES:
         info["type_reponse"] = "autre"
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", info.get("date_entretien", "")):
-        info["date_entretien"] = ""
+    for key in ("date_entretien", "date_limite"):
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", info.get(key, "")):
+            info[key] = ""
     return info
 
 
@@ -79,6 +102,7 @@ def situation_text(info: dict) -> str:
         info.get("resume", ""),
         f"Type : {info.get('type_reponse', '')}",
         f"Date : {info.get('date_entretien', '')} {info.get('heure', '')}".strip(),
+        f"Échéance : {info.get('date_limite', '')}",
         f"Format : {info.get('format', '')} {info.get('lieu_ou_lien', '')}".strip(),
         f"Interlocuteurs : {info.get('interlocuteurs', '')}",
         f"À faire : {info.get('a_faire', '')}",
@@ -114,8 +138,12 @@ async def record_reply(message: str, app_id: int | None = None, offer_text: str 
         updates["status"] = "postule"
     if contact:
         updates["contact"] = contact
-    if info["date_entretien"]:
+    if info["type_reponse"] == "refus":
+        updates["next_action_on"] = ""  # plus rien à faire pour cette candidature
+    elif info["date_entretien"]:
         updates["next_action_on"] = info["date_entretien"]
+    elif info["date_limite"] and info["type_reponse"] != "refus":
+        updates["next_action_on"] = info["date_limite"]
     elif info.get("a_faire") and info["type_reponse"] != "refus":
         updates["next_action_on"] = date.today().isoformat()
     if not app.get("title") or app["title"] == "Poste à préciser":

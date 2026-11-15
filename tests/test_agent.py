@@ -110,3 +110,41 @@ def test_agent_reports_tool_errors_without_crashing(monkeypatch):
 def test_agent_offers_france_travail_tool_when_configured(monkeypatch):
     monkeypatch.setattr(jobs, "is_configured", lambda: True)
     assert "rechercher_offres_france_travail" in [t["function"]["name"] for t in agent._tools()]
+
+
+def test_agent_survives_invalid_tool_call(monkeypatch):
+    calls = []
+
+    async def fake_complete(messages, temperature=0.5, tools=None):
+        calls.append(tools)
+        if tools:
+            raise llm.ToolCallError("attempted to call tool 'ouvrir_page' which was not in request.tools")
+        return {"content": "Réponse sans recherche."}
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
+    result = asyncio.run(agent.run({}, [{"role": "user", "content": "cherche"}]))
+    assert result["text"] == "Réponse sans recherche."
+    assert len(calls) == 3 and calls[-1] is None  # 2 essais avec outils, puis réponse sans outils
+    assert "sans recherche" in result["steps"][0]
+
+
+def test_final_answer_is_requested_without_tool_history(monkeypatch):
+    calls = []
+
+    async def fake_complete(messages, temperature=0.5, tools=None):
+        calls.append((messages, tools))
+        if tools:  # le modèle insiste pour chercher
+            return {"content": "", "tool_calls": [{"id": f"c{len(calls)}", "function": {"name": "recherche_web", "arguments": '{"requete": "x"}'}}]}
+        return {"content": "Synthèse finale."}
+
+    async def failing_search(query, max_results=8):
+        raise websearch.WebSearchError("bloqué")
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
+    monkeypatch.setattr(websearch, "search", failing_search)
+    result = asyncio.run(agent.run({}, [{"role": "user", "content": "cherche"}]))
+    assert result["text"] == "Synthèse finale."
+    final_messages, final_tools = calls[-1]
+    assert final_tools is None
+    assert all(m["role"] != "tool" and not m.get("tool_calls") for m in final_messages)
+    assert "bloqué" in final_messages[-1]["content"]

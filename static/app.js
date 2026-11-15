@@ -443,7 +443,7 @@ $("#reply-form").onsubmit = (e) => {
       $("#reply-result").innerHTML = `
         <div class="card">
           <h3>${escapeHtml(REPLY_LABELS[analysis.type_reponse] || "Réponse")} — ${escapeHtml(a.title)}${a.company ? " · " + escapeHtml(a.company) : ""}</h3>
-          <div class="meta">Fiche ${created ? "créée" : "mise à jour"} · statut : ${escapeHtml(STATUS_LABELS[a.status] || a.status)}${when ? " · " + escapeHtml(when) : ""}${analysis.format ? " · " + escapeHtml(analysis.format) : ""}</div>
+          <div class="meta">Fiche ${created ? "créée" : "mise à jour"} · statut : ${escapeHtml(STATUS_LABELS[a.status] || a.status)}${when ? " · " + escapeHtml(when) : ""}${analysis.format ? " · " + escapeHtml(analysis.format) : ""}${analysis.date_limite ? " · échéance : " + escapeHtml(analysis.date_limite) : ""}</div>
           ${analysis.resume ? `<div class="desc">${escapeHtml(analysis.resume)}</div>` : ""}
           ${analysis.a_faire ? `<div class="desc"><strong>À faire :</strong> ${escapeHtml(analysis.a_faire)}</div>` : ""}
           ${prep_error ? `<div class="desc late">Préparation non générée : ${escapeHtml(prep_error)} Tu pourras la relancer depuis la fiche.</div>` : ""}

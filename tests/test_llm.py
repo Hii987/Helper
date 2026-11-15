@@ -95,3 +95,12 @@ def test_degenerate_twice_gives_clear_error(monkeypatch, fast):
     with pytest.raises(llm.LLMError):
         asyncio.run(llm.chat([{"role": "user", "content": "x"}]))
     assert not llm._degenerate("| --- | --- |\n" + "-" * 80)
+
+
+def test_invalid_tool_call_raises_specific_error(monkeypatch, fast):
+    async def fake_post(payload, headers):
+        return _resp(400, {"error": {"message": "Tool call validation failed: attempted to call tool 'ouvrir_page'"}})
+
+    monkeypatch.setattr(llm, "_post", fake_post)
+    with pytest.raises(llm.ToolCallError):
+        asyncio.run(llm.complete([{"role": "user", "content": "x"}], tools=[{"type": "function"}]))
