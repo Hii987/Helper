@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 import time
 
 import httpx
@@ -32,8 +33,17 @@ async def chat(messages: list[dict], temperature: float = 0.5, max_tokens: int =
 
     Avec `json_mode`, le modèle est contraint de répondre par un objet JSON.
     """
-    message = await complete(messages, temperature, max_tokens=max_tokens, json_mode=json_mode)
-    return message.get("content") or ""
+    for attempt in range(2):
+        message = await complete(messages, temperature, max_tokens=max_tokens, json_mode=json_mode)
+        text = message.get("content") or ""
+        if not _degenerate(text):
+            return text
+    raise LLMError("L'IA a produit une réponse inutilisable, réessaie dans un instant.")
+
+
+def _degenerate(text: str) -> bool:
+    """Détecte une génération qui déraille (un même caractère répété des centaines de fois)."""
+    return bool(re.search(r"(\s)\1{100,}|(\S)\2{200,}", text))
 
 
 async def complete(messages: list[dict], temperature: float = 0.5, tools: list[dict] | None = None,
@@ -52,12 +62,17 @@ async def complete(messages: list[dict], temperature: float = 0.5, tools: list[d
             "https://console.groq.com/keys, puis redémarre l'application."
         )
 
+    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
     payload = {
-        "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        "model": model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    if model.startswith("openai/gpt-oss"):
+        # Ces modèles « réfléchissent » avant de répondre : on limite cette étape,
+        # qui consomme le quota de tokens du plan gratuit.
+        payload["reasoning_effort"] = "low"
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
     if tools:

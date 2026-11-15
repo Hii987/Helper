@@ -15,7 +15,7 @@ from datetime import date
 
 from . import db, llm, prompts, websearch
 
-PREP_MAX_TOKENS = 3500
+PREP_MAX_TOKENS = 4500
 MAX_SNIPPET = 300
 
 # Statut de la candidature selon le type de réponse reçue.

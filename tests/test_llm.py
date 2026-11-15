@@ -74,3 +74,24 @@ def test_json_mode_and_max_tokens(monkeypatch, fast):
     asyncio.run(llm.chat([{"role": "user", "content": "x"}]))
     assert sent[0]["response_format"] == {"type": "json_object"} and sent[0]["max_tokens"] == 3000
     assert "response_format" not in sent[1]
+
+
+def test_degenerate_answer_is_retried(monkeypatch, fast):
+    answers = ["## 1. Situation\n" + " " * 5000, "## 1. Situation\nOK"]
+
+    async def fake_post(payload, headers):
+        content = answers.pop(0)
+        return _resp(200, {"choices": [{"message": {"role": "assistant", "content": content}}]})
+
+    monkeypatch.setattr(llm, "_post", fake_post)
+    assert asyncio.run(llm.chat([{"role": "user", "content": "x"}])) == "## 1. Situation\nOK"
+
+
+def test_degenerate_twice_gives_clear_error(monkeypatch, fast):
+    async def fake_post(payload, headers):
+        return _resp(200, {"choices": [{"message": {"role": "assistant", "content": " " * 500}}]})
+
+    monkeypatch.setattr(llm, "_post", fake_post)
+    with pytest.raises(llm.LLMError):
+        asyncio.run(llm.chat([{"role": "user", "content": "x"}]))
+    assert not llm._degenerate("| --- | --- |\n" + "-" * 80)

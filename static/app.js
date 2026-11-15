@@ -59,31 +59,45 @@ function showOutput(el, text) {
   el.append(copy, document.createTextNode(text));
 }
 
-// Rendu Markdown minimal (titres, listes, gras, liens) ; le texte est échappé avant.
+// Rendu Markdown minimal (titres, listes, tableaux, citations, gras, liens) ; le texte est échappé avant.
 function renderMarkdown(text) {
   const inline = (line) =>
-    escapeHtml(line)
+    escapeHtml(line.replace(/<(https?:\/\/[^\s>]+)>/g, "$1"))
+      .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)"'<>]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
       .replace(/(^|[\s(])(https?:\/\/[^\s)"'<>]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+  const cells = (line) => line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+  const lines = (text || "").split("\n");
   let html = "";
-  let inList = false;
-  for (const raw of (text || "").split("\n")) {
-    const line = raw.trimEnd();
-    const item = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)/);
-    if (item) {
-      if (!inList) html += "<ul>";
-      inList = true;
-      html += `<li>${inline(item[1])}</li>`;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trimEnd();
+    // Tableau : ligne d'en-tête suivie de |---|---|
+    if (line.trim().startsWith("|") && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1] || "")) {
+      html += "<div class='table-wrap'><table><thead><tr>" + cells(line).map((c) => `<th>${inline(c)}</th>`).join("") + "</tr></thead><tbody>";
+      i += 2;
+      while (i < lines.length && lines[i].trim().startsWith("|")) {
+        html += "<tr>" + cells(lines[i]).map((c) => `<td>${inline(c)}</td>`).join("") + "</tr>";
+        i++;
+      }
+      html += "</tbody></table></div>";
+      i--;
       continue;
     }
-    if (inList) html += "</ul>";
-    inList = false;
+    const item = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)/);
+    if (item) {
+      html += html.endsWith("</ul>") ? "" : "<ul>";
+      html = html.replace(/<\/ul>$/, "") + `<li>${inline(item[1])}</li></ul>`;
+      continue;
+    }
     const heading = line.match(/^(#{1,4})\s+(.*)/);
+    const quote = line.match(/^\s*>\s?(.*)/);
     if (heading) html += `<h${heading[1].length + 1}>${inline(heading[2])}</h${heading[1].length + 1}>`;
+    else if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) html += "<hr>";
+    else if (quote) html += `<blockquote>${inline(quote[1])}</blockquote>`;
     else if (line.trim()) html += `<p>${inline(line)}</p>`;
   }
-  return html + (inList ? "</ul>" : "");
+  return html;
 }
 
 function switchTab(name) {

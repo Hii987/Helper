@@ -33,7 +33,7 @@ Ouvre ensuite http://localhost:8000.
 2. Crée une clé dans *API Keys* (https://console.groq.com/keys).
 3. Mets-la dans `.env` : `GROQ_API_KEY=...`
 
-Le modèle par défaut est `llama-3.3-70b-versatile` (modifiable via `GROQ_MODEL`, voir https://console.groq.com/docs/models).
+Le modèle par défaut est `openai/gpt-oss-120b` (modifiable via `GROQ_MODEL`, voir https://console.groq.com/docs/models).
 
 Le plan gratuit limite le débit (environ 30 requêtes par minute) et le volume de tokens. L'appli s'y adapte :
 elle espace ses requêtes, réessaie automatiquement en cas de limite atteinte, raccourcit le CV et l'historique

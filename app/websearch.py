@@ -70,6 +70,8 @@ async def search(query: str, max_results: int = 8) -> list[dict]:
             resp = await client.post(DDG_URL, data={"q": query, "kl": "fr-fr"})
     except httpx.HTTPError as exc:
         raise WebSearchError(f"Recherche web impossible : {exc}") from exc
+    if resp.status_code == 202:  # page anti-robot de DuckDuckGo
+        raise WebSearchError("DuckDuckGo bloque temporairement les recherches depuis cette connexion.")
     if resp.status_code != 200:
         raise WebSearchError(f"Le moteur de recherche a répondu {resp.status_code}.")
     return parse_results(resp.text)[:max_results]
