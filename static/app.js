@@ -59,6 +59,33 @@ function showOutput(el, text) {
   el.append(copy, document.createTextNode(text));
 }
 
+// Rendu Markdown minimal (titres, listes, gras, liens) ; le texte est échappé avant.
+function renderMarkdown(text) {
+  const inline = (line) =>
+    escapeHtml(line)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)"'<>]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      .replace(/(^|[\s(])(https?:\/\/[^\s)"'<>]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+  let html = "";
+  let inList = false;
+  for (const raw of (text || "").split("\n")) {
+    const line = raw.trimEnd();
+    const item = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)/);
+    if (item) {
+      if (!inList) html += "<ul>";
+      inList = true;
+      html += `<li>${inline(item[1])}</li>`;
+      continue;
+    }
+    if (inList) html += "</ul>";
+    inList = false;
+    const heading = line.match(/^(#{1,4})\s+(.*)/);
+    if (heading) html += `<h${heading[1].length + 1}>${inline(heading[2])}</h${heading[1].length + 1}>`;
+    else if (line.trim()) html += `<p>${inline(line)}</p>`;
+  }
+  return html + (inList ? "</ul>" : "");
+}
+
 function switchTab(name) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.id === `tab-${name}`));
@@ -176,7 +203,10 @@ document.addEventListener("click", async (e) => {
     try {
       await api("/api/applications", {
         method: "POST",
-        body: { title: o.title, company: o.company || "", contract_type: o.contract_type || "", location: o.location || "", url: o.url },
+        body: {
+          title: o.title, company: o.company || "", contract_type: o.contract_type || "", location: o.location || "",
+          url: o.url, offer_text: o.description || "",
+        },
       });
       e.target.textContent = "Suivie ✓";
       e.target.disabled = true;
@@ -264,6 +294,15 @@ async function loadApplications() {
     toast(err.message);
     return;
   }
+  const select = $("#reply-form").elements.application_id;
+  const chosen = select.value;
+  select.innerHTML =
+    '<option value="">Détecter automatiquement</option>' +
+    applications
+      .map((a) => `<option value="${a.id}">${escapeHtml(a.title)}${a.company ? " — " + escapeHtml(a.company) : ""}</option>`)
+      .join("");
+  select.value = chosen;
+
   const counts = {};
   applications.forEach((a) => (counts[a.status] = (counts[a.status] || 0) + 1));
   $("#tracker-summary").innerHTML =
@@ -280,7 +319,7 @@ async function loadApplications() {
           const late = a.next_action_on && a.next_action_on <= today && !["offre", "refuse"].includes(a.status);
           return `
       <div class="card" data-id="${a.id}">
-        <h3>${escapeHtml(a.title)}${a.company ? " — " + escapeHtml(a.company) : ""}</h3>
+        <h3>${escapeHtml(a.title)}${a.company ? " — " + escapeHtml(a.company) : ""}${a.prep ? '<span class="badge">Préparation prête</span>' : ""}</h3>
         <div class="meta">${escapeHtml([a.contract_type, a.location, a.contact].filter(Boolean).join(" · "))}</div>
         <div class="meta">
           ${a.applied_on ? "Postulé le " + escapeHtml(a.applied_on) : "Ajouté le " + escapeHtml(a.created_on)}
@@ -294,6 +333,7 @@ async function loadApplications() {
               .join("")}
           </select>
           ${a.url ? `<a href="${escapeHtml(a.url)}" target="_blank" rel="noopener"><button class="small secondary" type="button">Offre</button></a>` : ""}
+          <button class="small" data-action="open">Fiche &amp; préparation</button>
           <button class="small secondary" data-action="followup">Rédiger une relance</button>
           <button class="small secondary" data-action="notes">Notes</button>
           <button class="small danger" data-action="delete">Supprimer</button>
@@ -328,6 +368,8 @@ $("#tracker-list").onclick = async (e) => {
       if (!confirm("Supprimer cette candidature ?")) return;
       await api(`/api/applications/${id}`, { method: "DELETE" });
       loadApplications();
+    } else if (action === "open") {
+      openApplication(id);
     } else if (action === "notes") {
       const notes = prompt("Notes :", app.notes);
       if (notes === null) return;
@@ -358,6 +400,142 @@ $("#app-form").onsubmit = async (e) => {
   } catch (err) {
     toast(err.message);
   }
+};
+
+// ---------- Réponse d'un recruteur ----------
+
+const REPLY_LABELS = {
+  entretien: "Invitation à un entretien",
+  test: "Test / étude de cas",
+  offre: "Proposition d'embauche",
+  refus: "Réponse négative",
+  demande_infos: "Demande d'informations",
+  autre: "Autre réponse",
+};
+
+$("#reply-form").onsubmit = (e) => {
+  e.preventDefault();
+  const form = e.target;
+  const body = {
+    message: form.elements.message.value,
+    application_id: form.elements.application_id.value ? Number(form.elements.application_id.value) : null,
+    offer_text: form.elements.offer_text.value,
+  };
+  withBusy(e.submitter, async () => {
+    $("#reply-result").innerHTML = "<p class='meta'>Analyse du message, recherches sur l'entreprise et préparation en cours (jusqu'à une minute)…</p>";
+    try {
+      const { application: a, analysis, created, steps, prep_error } = await api("/api/recruiter-reply", { method: "POST", body });
+      const when = [analysis.date_entretien, analysis.heure].filter(Boolean).join(" à ");
+      $("#reply-result").innerHTML = `
+        <div class="card">
+          <h3>${escapeHtml(REPLY_LABELS[analysis.type_reponse] || "Réponse")} — ${escapeHtml(a.title)}${a.company ? " · " + escapeHtml(a.company) : ""}</h3>
+          <div class="meta">Fiche ${created ? "créée" : "mise à jour"} · statut : ${escapeHtml(STATUS_LABELS[a.status] || a.status)}${when ? " · " + escapeHtml(when) : ""}${analysis.format ? " · " + escapeHtml(analysis.format) : ""}</div>
+          ${analysis.resume ? `<div class="desc">${escapeHtml(analysis.resume)}</div>` : ""}
+          ${analysis.a_faire ? `<div class="desc"><strong>À faire :</strong> ${escapeHtml(analysis.a_faire)}</div>` : ""}
+          ${prep_error ? `<div class="desc late">Préparation non générée : ${escapeHtml(prep_error)} Tu pourras la relancer depuis la fiche.</div>` : ""}
+          ${steps.length ? `<div class="steps">${steps.map((s) => `<div>🔎 ${escapeHtml(s)}</div>`).join("")}</div>` : ""}
+          <div class="actions"><button class="small" type="button" data-action="open-reply" data-id="${a.id}">Ouvrir la fiche${a.prep ? " et la préparation" : ""}</button></div>
+        </div>`;
+      form.reset();
+      loadApplications();
+      if (a.prep) openApplication(a.id);
+    } catch (err) {
+      $("#reply-result").innerHTML = "";
+      throw err;
+    }
+  });
+};
+
+$("#reply-result").onclick = (e) => {
+  if (e.target.dataset.action === "open-reply") openApplication(e.target.dataset.id);
+};
+
+// ---------- Fiche détaillée d'une candidature ----------
+
+let currentApp = null;
+
+function renderApplication(a) {
+  currentApp = a;
+  $("#dlg-title").textContent = a.title + (a.company ? " — " + a.company : "");
+  $("#dlg-meta").textContent = [
+    STATUS_LABELS[a.status] || a.status,
+    a.contract_type,
+    a.location,
+    a.contact,
+    a.next_action_on && "Prochaine étape : " + a.next_action_on,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  $("#dlg-prepare").textContent = a.prep ? "Régénérer la préparation" : "Générer la préparation";
+  $("#dlg-reply").hidden = !a.events?.length;
+  $("#dlg-offer").value = a.offer_text || "";
+  const prep = $("#dlg-prep");
+  prep.innerHTML = "";
+  if (a.prep) {
+    const copy = document.createElement("button");
+    copy.className = "secondary small copy-btn";
+    copy.textContent = "Copier";
+    copy.onclick = () => navigator.clipboard.writeText(a.prep).then(() => toast("Copié !"));
+    const body = document.createElement("div");
+    body.innerHTML = `<div class="meta">Préparation du ${escapeHtml(a.prep_updated_on)}</div>` + renderMarkdown(a.prep);
+    prep.append(copy, body);
+  }
+  $("#dlg-events").innerHTML = a.events?.length
+    ? a.events
+        .map(
+          (ev) => `
+      <div class="card">
+        <div class="meta">${escapeHtml(ev.date)} · ${escapeHtml(REPLY_LABELS[ev.kind.replace("reponse_", "")] || ev.kind)}</div>
+        <div class="desc">${escapeHtml(ev.summary)}</div>
+        <details><summary>Message complet</summary><div class="desc">${escapeHtml(ev.content)}</div></details>
+      </div>`
+        )
+        .join("")
+    : "<p class='meta'>Aucun échange enregistré. Colle les réponses du recruteur dans le bloc « J'ai reçu une réponse ».</p>";
+}
+
+async function openApplication(id) {
+  try {
+    renderApplication(await api(`/api/applications/${id}`));
+    $("#dlg-steps").innerHTML = "";
+    if (!$("#app-dialog").open) $("#app-dialog").showModal();
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+$("#dlg-close").onclick = () => $("#app-dialog").close();
+
+$("#dlg-prepare").onclick = (e) =>
+  withBusy(e.target, async () => {
+    $("#dlg-steps").innerHTML = "<div>Recherches sur l'entreprise et analyse des compétences en cours…</div>";
+    try {
+      const { application, steps } = await api(`/api/applications/${currentApp.id}/prepare`, { method: "POST" });
+      renderApplication({ ...application, events: currentApp.events });
+      $("#dlg-steps").innerHTML = steps.map((s) => `<div>🔎 ${escapeHtml(s)}</div>`).join("");
+      loadApplications();
+    } catch (err) {
+      $("#dlg-steps").innerHTML = "";
+      throw err;
+    }
+  });
+
+$("#dlg-offer-save").onclick = async () => {
+  try {
+    const updated = await api(`/api/applications/${currentApp.id}`, { method: "PATCH", body: { offer_text: $("#dlg-offer").value } });
+    currentApp = { ...updated, events: currentApp.events };
+    toast("Fiche de poste enregistrée. Régénère la préparation pour en tenir compte.");
+  } catch (err) {
+    toast(err.message);
+  }
+};
+
+$("#dlg-reply").onclick = () => {
+  const last = currentApp.events[0];
+  $("#email-received").value = last.content;
+  $("#email-goal").value = ["reponse_entretien", "reponse_test", "reponse_offre"].includes(last.kind) ? "accept" : "reply";
+  $("#app-dialog").close();
+  switchTab("email");
 };
 
 // ---------- Profil ----------

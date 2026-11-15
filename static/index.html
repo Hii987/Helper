@@ -96,6 +96,21 @@
 
     <!-- Candidatures -->
     <section id="tab-tracker" class="tab">
+      <details id="reply-box" class="reply-box" open>
+        <summary>📩 J'ai reçu une réponse d'un recruteur</summary>
+        <p class="hint">Colle le mail : la fiche de suivi est créée ou mise à jour automatiquement (statut, date, contact), puis une préparation d'entretien est générée avec des recherches sur l'entreprise et une analyse détaillée des compétences demandées.</p>
+        <form id="reply-form">
+          <label>Message du recruteur <textarea name="message" rows="6" required placeholder="Bonjour, suite à votre candidature au poste de… nous souhaiterions vous rencontrer le…"></textarea></label>
+          <div class="grid">
+            <label>Candidature concernée
+              <select name="application_id"><option value="">Détecter automatiquement</option></select>
+            </label>
+          </div>
+          <label>Fiche de poste (facultatif, pour une analyse plus précise) <textarea name="offer_text" rows="3" placeholder="Colle ici le texte de l'annonce si l'appli ne l'a pas déjà"></textarea></label>
+          <button type="submit">Analyser et préparer l'entretien</button>
+        </form>
+        <div id="reply-result"></div>
+      </details>
       <details>
         <summary>Ajouter une candidature</summary>
         <form id="app-form" class="grid">
@@ -108,6 +123,7 @@
           <label>Postulé le <input name="applied_on" type="date"></label>
           <label>Prochaine action <input name="next_action_on" type="date"></label>
           <label class="wide">Notes <textarea name="notes" rows="2"></textarea></label>
+          <label class="wide">Fiche de poste <textarea name="offer_text" rows="3" placeholder="Texte de l'annonce (utilisé pour préparer l'entretien)"></textarea></label>
           <button type="submit">Ajouter</button>
         </form>
       </details>
@@ -128,6 +144,31 @@
       </form>
     </section>
   </main>
+
+  <dialog id="app-dialog">
+    <div class="dialog-head">
+      <div>
+        <h2 id="dlg-title"></h2>
+        <div id="dlg-meta" class="meta"></div>
+      </div>
+      <button class="secondary small" id="dlg-close" type="button">Fermer</button>
+    </div>
+    <div class="actions">
+      <button id="dlg-prepare" type="button">Générer la préparation</button>
+      <button id="dlg-reply" class="secondary" type="button">Rédiger la réponse au dernier message</button>
+    </div>
+    <div id="dlg-steps" class="steps"></div>
+    <div id="dlg-prep" class="output prep"></div>
+    <details>
+      <summary>Historique des échanges</summary>
+      <div id="dlg-events"></div>
+    </details>
+    <details>
+      <summary>Fiche de poste</summary>
+      <textarea id="dlg-offer" rows="8" placeholder="Colle ici le texte de l'annonce"></textarea>
+      <div class="actions"><button id="dlg-offer-save" class="secondary small" type="button">Enregistrer la fiche de poste</button></div>
+    </details>
+  </dialog>
 
   <div id="toast" class="toast"></div>
   <script src="/static/app.js"></script>

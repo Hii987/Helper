@@ -26,13 +26,18 @@ def is_configured() -> bool:
     return bool(os.getenv("GROQ_API_KEY"))
 
 
-async def chat(messages: list[dict], temperature: float = 0.5) -> str:
-    """Envoie une liste de messages {role, content} et renvoie la réponse texte."""
-    message = await complete(messages, temperature)
+async def chat(messages: list[dict], temperature: float = 0.5, max_tokens: int = MAX_OUTPUT_TOKENS,
+               json_mode: bool = False) -> str:
+    """Envoie une liste de messages {role, content} et renvoie la réponse texte.
+
+    Avec `json_mode`, le modèle est contraint de répondre par un objet JSON.
+    """
+    message = await complete(messages, temperature, max_tokens=max_tokens, json_mode=json_mode)
     return message.get("content") or ""
 
 
-async def complete(messages: list[dict], temperature: float = 0.5, tools: list[dict] | None = None) -> dict:
+async def complete(messages: list[dict], temperature: float = 0.5, tools: list[dict] | None = None,
+                   max_tokens: int = MAX_OUTPUT_TOKENS, json_mode: bool = False) -> dict:
     """Renvoie le message brut de l'assistant (avec éventuels `tool_calls`)."""
     api_key = (os.getenv("GROQ_API_KEY") or "").strip().strip("\"'")
     if not api_key:
@@ -51,8 +56,10 @@ async def complete(messages: list[dict], temperature: float = 0.5, tools: list[d
         "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
         "messages": messages,
         "temperature": temperature,
-        "max_tokens": MAX_OUTPUT_TOKENS,
+        "max_tokens": max_tokens,
     }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"

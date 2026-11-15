@@ -10,7 +10,7 @@ Application web locale qui t'aide à chercher un emploi, un stage ou une alterna
 | **Offres** | Recherche d'offres d'emploi / stage / alternance sur le web et via l'API gratuite de France Travail, + liens directs vers Indeed, Welcome to the Jungle, LinkedIn, La bonne alternance, 1jeune1solution. Un clic pour suivre une offre ou générer la lettre de motivation. |
 | **CV & lettre** | Génère une lettre de motivation adaptée à une offre, ou analyse ton CV (points forts, améliorations, mots-clés manquants). |
 | **E-mails** | Rédige la réponse à un mail de recruteur : répondre, accepter un entretien, décliner, relancer, remercier — avec le ton choisi. |
-| **Candidatures** | Suivi de tes candidatures (statut, dates, contact, notes), avec mise en évidence des relances en retard et bouton « Rédiger une relance ». |
+| **Candidatures** | Suivi de tes candidatures (statut, dates, contact, notes), avec mise en évidence des relances en retard et bouton « Rédiger une relance ». **Colle la réponse d'un recruteur** : la fiche de suivi est créée ou mise à jour automatiquement, et une préparation d'entretien est générée (voir ci-dessous). |
 | **Profil** | Ton objectif, tes compétences et ton CV, utilisés par l'IA. Stocké localement (SQLite). |
 
 ## Installation
@@ -59,6 +59,16 @@ L'IA (Groq) utilise des « outils » (function calling) qu'elle appelle quand el
 
 Les étapes de recherche s'affichent dans la conversation (🔎). L'IA a pour consigne de ne citer que des offres et des liens réellement trouvés.
 
+## Réponses de recruteurs et préparation d'entretien
+
+Dans l'onglet **Candidatures**, le bloc « J'ai reçu une réponse d'un recruteur » prend le mail tel quel :
+
+1. **Analyse du message** : type de réponse (entretien, test, offre, refus, demande d'informations), date et heure, format, contact, action attendue.
+2. **Fiche de suivi** : la candidature correspondante est retrouvée d'après le nom de l'entreprise (ou créée si elle n'existe pas), son statut, sa prochaine échéance et son contact sont mis à jour, et le message est ajouté à l'historique des échanges.
+3. **Préparation d'entretien** (sauf en cas de refus) : l'appli lit la fiche de poste (texte collé, ou page de l'offre via son lien), fait des recherches web sur l'entreprise, puis l'IA produit une fiche avec la situation, une présentation sourcée de l'entreprise, une **analyse détaillée de chaque compétence demandée** (niveau attendu, ton niveau d'après ton profil, exemple concret à raconter, questions probables, plan de mise à niveau si besoin), un taux d'adéquation, ton pitch, les questions probables et à poser, et une checklist.
+
+Chaque candidature a une fiche détaillée (bouton « Fiche & préparation ») pour relire la préparation, la régénérer, compléter la fiche de poste et rédiger la réponse au dernier message.
+
 ## Tests
 
 ```bash
@@ -71,11 +81,12 @@ pytest
 app/
   main.py     # routes FastAPI
   llm.py      # client Groq
-  prompts.py  # prompts (chat, lettre, CV, e-mails)
+  prompts.py  # prompts (chat, lettre, CV, e-mails, réponses recruteurs, préparation)
   agent.py    # assistant avec outils de recherche (function calling)
   websearch.py # recherche web (DuckDuckGo) et lecture de pages
   jobs.py     # recherche d'offres France Travail + liens externes
-  db.py       # SQLite : profil et candidatures
+  tracking.py # réponses de recruteurs → fiche de suivi + préparation d'entretien
+  db.py       # SQLite : profil, candidatures et historique des échanges
 static/       # interface web (HTML/CSS/JS sans dépendance)
 tests/
 ```

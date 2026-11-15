@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-from . import agent, db, jobs, llm, prompts, websearch  # noqa: E402  (après load_dotenv)
+from . import agent, db, jobs, llm, prompts, tracking, websearch  # noqa: E402  (après load_dotenv)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -69,6 +69,14 @@ class Application(BaseModel):
     next_action_on: str = ""
     contact: str = ""
     notes: str = ""
+    offer_text: str = ""
+
+
+class RecruiterReply(BaseModel):
+    message: str
+    application_id: int | None = None
+    offer_text: str = ""
+    prepare: bool = True
 
 
 # ---------- Routes ----------
@@ -166,6 +174,48 @@ def list_applications():
 @app.post("/api/applications", status_code=201)
 def create_application(application: Application):
     return db.create_application(application.model_dump())
+
+
+@app.get("/api/applications/{app_id}")
+def get_application(app_id: int):
+    application = db.get_application(app_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Candidature introuvable.")
+    return application | {"events": db.list_events(app_id)}
+
+
+@app.post("/api/recruiter-reply")
+async def recruiter_reply(req: RecruiterReply):
+    """Message d'un recruteur → fiche de suivi créée / mise à jour + préparation d'entretien."""
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Colle le message du recruteur.")
+    try:
+        application, info, created = await tracking.record_reply(req.message, req.application_id, req.offer_text)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except llm.LLMError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    result = {"application": application, "analysis": info, "created": created, "steps": [], "prep_error": None}
+    if req.prepare and info["type_reponse"] != "refus":
+        try:  # la fiche de suivi est déjà enregistrée : un échec ici ne doit pas la perdre
+            result["application"], result["steps"] = await tracking.prepare(
+                application["id"], tracking.situation_text(info)
+            )
+        except llm.LLMError as exc:
+            result["prep_error"] = str(exc)
+    return result
+
+
+@app.post("/api/applications/{app_id}/prepare")
+async def prepare_interview(app_id: int):
+    try:
+        application, steps = await tracking.prepare(app_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except llm.LLMError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"application": application, "steps": steps}
 
 
 @app.patch("/api/applications/{app_id}")

@@ -17,7 +17,7 @@ def client(tmp_path, monkeypatch):
 def fake_llm(monkeypatch):
     calls = []
 
-    async def fake_chat(messages, temperature=0.5):
+    async def fake_chat(messages, temperature=0.5, **kwargs):
         calls.append(messages)
         return "réponse simulée"
 

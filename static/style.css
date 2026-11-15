@@ -113,3 +113,22 @@ details summary { cursor: pointer; color: var(--accent); margin-bottom: 8px; }
 .msg.pending { opacity: .7; font-style: italic; }
 .chat-offers { align-self: stretch; }
 #tab-jobs h2 { font-size: 1rem; margin: 16px 0 8px; }
+
+.reply-box { border: 1px solid var(--accent); border-radius: 10px; padding: 12px; margin-bottom: 16px; background: var(--accent-soft); }
+.reply-box > summary { font-weight: 600; }
+.reply-box textarea, .reply-box select { background: var(--card); }
+
+dialog {
+  width: min(900px, calc(100% - 32px)); max-height: calc(100vh - 48px); overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+  background: var(--card); color: var(--text);
+}
+dialog::backdrop { background: rgba(0, 0, 0, .45); }
+.dialog-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.dialog-head h2 { margin: 0; font-size: 1.2rem; }
+dialog details { margin-top: 12px; }
+.output.prep { white-space: normal; margin: 8px 0; }
+.prep h2, .prep h3, .prep h4, .prep h5 { margin: 16px 0 6px; font-size: 1rem; color: var(--accent); }
+.prep p { margin: 4px 0; }
+.prep ul { margin: 4px 0; padding-left: 20px; }
+.prep a { color: var(--accent); word-break: break-all; }

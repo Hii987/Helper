@@ -1,4 +1,4 @@
-"""Stockage SQLite : profil unique + suivi des candidatures."""
+"""Stockage SQLite : profil unique + suivi des candidatures et de leurs échanges."""
 
 import os
 import sqlite3
@@ -9,6 +9,7 @@ PROFILE_FIELDS = ("name", "target", "location", "skills", "cv")
 APPLICATION_FIELDS = (
     "title", "company", "contract_type", "location", "url",
     "status", "applied_on", "next_action_on", "contact", "notes",
+    "offer_text", "prep", "prep_updated_on",
 )
 STATUSES = ("a_postuler", "postule", "relance", "entretien", "offre", "refuse")
 
@@ -41,6 +42,17 @@ def init_db() -> None:
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             + ", ".join(f"{f} TEXT DEFAULT ''" for f in APPLICATION_FIELDS)
             + ", created_on TEXT)"
+        )
+        # Bases créées avant l'ajout de colonnes : on complète le schéma.
+        existing = {r["name"] for r in conn.execute("PRAGMA table_info(applications)")}
+        for field in APPLICATION_FIELDS:
+            if field not in existing:
+                conn.execute(f"ALTER TABLE applications ADD COLUMN {field} TEXT DEFAULT ''")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS events ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "application_id INTEGER NOT NULL, "
+            "date TEXT, kind TEXT, summary TEXT DEFAULT '', content TEXT DEFAULT '')"
         )
 
 
@@ -106,5 +118,22 @@ def update_application(app_id: int, data: dict) -> dict | None:
 
 def delete_application(app_id: int) -> bool:
     with connect() as conn:
+        conn.execute("DELETE FROM events WHERE application_id = ?", (app_id,))
         cur = conn.execute("DELETE FROM applications WHERE id = ?", (app_id,))
     return cur.rowcount > 0
+
+
+def add_event(app_id: int, kind: str, summary: str = "", content: str = "") -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO events (application_id, date, kind, summary, content) VALUES (?, ?, ?, ?, ?)",
+            (app_id, date.today().isoformat(), kind, summary, content),
+        )
+
+
+def list_events(app_id: int) -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM events WHERE application_id = ? ORDER BY id DESC", (app_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
