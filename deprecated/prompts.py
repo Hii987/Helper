@@ -109,7 +109,9 @@ def recruiter_reply_messages(message: str, today: str, known: str) -> list[dict]
         '- "entreprise", "poste"\n'
         '- "contact_nom", "contact_email", "contact_role"\n'
         '- "date_entretien" : au format AAAA-MM-JJ (calcule les dates relatives à partir '
-        f"d'aujourd'hui : {today})\n"
+        f"d'aujourd'hui : {today}) ; uniquement la date de l'entretien ou de l'appel lui-même\n"
+        '- "date_limite" : AAAA-MM-JJ, date avant laquelle je dois agir (rendre un test, répondre à une offre, '
+        "envoyer un document)\n"
         '- "heure", "format" (visio, téléphone, présentiel…), "lieu_ou_lien", "interlocuteurs"\n'
         '- "a_faire" : ce que la personne doit faire ensuite (répondre, confirmer un créneau, envoyer un document…)\n'
         '- "resume" : une ou deux phrases qui résument le message\n\n'
