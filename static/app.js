@@ -141,7 +141,7 @@ window.onhashchange = route;
 
 // ---------- Box ----------
 
-const box = { filter: "all", menuOpen: false };
+const box = { filter: "all", menuOpen: false, query: "" };
 
 async function showBox() {
   view.className = "list";
@@ -156,7 +156,9 @@ async function showBox() {
 }
 
 function renderBox() {
-  const shown = box.filter === "all" ? apps : apps.filter((a) => a.status === box.filter);
+  const query = box.query.trim().toLowerCase();
+  const shown = apps.filter((a) => (box.filter === "all" || a.status === box.filter)
+    && `${a.company} ${a.jobTitle ?? ""}`.toLowerCase().includes(query));
   const filters = ["all", ...STATUSES].map((key) => {
     const count = key === "all" ? apps.length : apps.filter((a) => a.status === key).length;
     const label = key === "all" ? t("filter.all") : t("status." + key);
@@ -176,6 +178,7 @@ function renderBox() {
     <header class="page-head">
       <h1>${t("nav.box")}</h1>
       <div class="tools">
+        <input class="field search" type="search" id="box-search" value="${esc(box.query)}" placeholder="${t("box.search")}" aria-label="${t("box.search")}">
         <div class="menu-wrap">
           <button class="btn" type="button" id="filter-btn" aria-haspopup="true" aria-expanded="${box.menuOpen}">
             ${icon("filter")}<span>${box.filter === "all" ? t("filter.label") : t("filter.active", { status: t("status." + box.filter) })}</span>${icon("chevron", 14, 'stroke="currentColor" stroke-width="2"')}
@@ -202,6 +205,14 @@ function renderBox() {
       Object.assign(box, { filter: pick.dataset.filter, menuOpen: false });
       renderBox();
     }
+  };
+  view.oninput = (e) => {
+    if (e.target.id !== "box-search") return;
+    box.query = e.target.value;
+    renderBox();
+    const input = document.getElementById("box-search");
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
   };
 }
 

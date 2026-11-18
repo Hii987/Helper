@@ -51,7 +51,8 @@ main { flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 24px 40
 main.list { padding: 32px 40px; }
 .narrow { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: 24px; }
 .page-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
-.page-head .tools { display: flex; align-items: center; gap: 8px; }
+.page-head .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.page-head .search { width: 260px; }
 .stack { display: flex; flex-direction: column; gap: 6px; }
 .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .lead { font-size: 14px; color: var(--muted); }

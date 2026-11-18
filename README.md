@@ -6,7 +6,7 @@ Application web pour suivre ses candidatures (emploi, stage, alternance). Chaque
 
 | Page | Ce que ça fait |
 |---|---|
-| **Box** | Liste des candidatures, triée par date du dernier changement de statut, filtrable par statut (Not sent, Sent, Positive response, Refused). |
+| **Box** | Liste des candidatures, triée par date du dernier changement de statut, filtrable par statut (Not sent, Sent, Positive response, Refused) et par recherche sur l'entreprise ou le poste. |
 | **Candidature** | Page de lecture pensée pour répondre à un recruteur : points clés de l'offre d'abord (ou l'e-mail envoyé pour une candidature spontanée), puis l'offre, le CV, le contact, l'e-mail, la lettre. |
 | **Création / modification** | Deux types : à une offre ou spontanée. Seules les bases sont obligatoires ; les sections (lien de l'offre, points clés, CV, lettre, e-mail, contact, section libre) s'ajoutent, se retirent et se réordonnent. **« Fetch and summarize »** lit la page de l'offre et l'IA (**Groq**) remplit les points clés ; un champ inconnu reste vide. |
 | **Offer search** | Recherche d'offres sur le web et via l'API France Travail ; « Track » crée une candidature à partir d'une offre. |
