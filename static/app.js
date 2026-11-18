@@ -20,11 +20,18 @@ const ICONS = {
   file: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/>',
   fileCheck: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9 13l2 2 4-4"/>',
   mail: '<path d="M3 5h18v14H3z"/><path d="M3 6l9 7 9-7"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+  pen: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  reply: '<path d="M10 7L4 12l6 5"/><path d="M4 12h11a5 5 0 0 1 5 5v2"/>',
+  spark: '<path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/>',
 };
 const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#9CA3AF">'
   + [6, 12, 18].map((y) => `<circle cx="9" cy="${y}" r="1.6"/><circle cx="15" cy="${y}" r="1.6"/>`).join("") + "</svg>";
 
 let userId; // undefined tant que Firebase n'a pas répondu, null si déconnecté
+let me = null; // { uid, admin, analytics, profileFilled, llm } renvoyé par /api/me
 let apps = [];
 let appsLoaded = false;
 let rerender = () => {};
@@ -48,7 +55,10 @@ async function api(path, options = {}) {
   });
   if (resp.status === 204) return null;
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw Object.assign(new Error(data.detail || `Error ${resp.status}`), { status: resp.status });
+  if (!resp.ok) {
+    if (resp.status !== 401) track("client_error", { ok: false, error: `${options.method || "GET"} ${path.split("?")[0].replace(/\/[\w-]{12,}/g, "/:id")} ${resp.status}` });
+    throw Object.assign(new Error(data.detail || `Error ${resp.status}`), { status: resp.status });
+  }
   return data;
 }
 
@@ -99,12 +109,22 @@ async function loadApps() {
 
 // ---------- Barre latérale et routes ----------
 
+const NAV = [
+  ["offers", "search", "nav.offers"],
+  ["reply", "reply", "nav.reply"],
+  ["assistant", "chat", "nav.assistant"],
+  ["write", "pen", "nav.write"],
+  ["profile", "user", "nav.profile"],
+];
+
 function renderNav() {
-  const offers = location.hash.startsWith("#/offers");
+  const page = location.hash.split("/")[1] || "";
   const current = (on) => (on ? ' aria-current="page"' : "");
+  const links = NAV.map(([key, ic, label]) => `<a href="#/${key}"${current(page === key)}>${icon(ic, 18)}<span>${t(label)}</span></a>`).join("");
   document.getElementById("nav").innerHTML = userId ? `
-    <a href="#/"${current(!offers)}>${icon("inbox", 18)}<span class="grow">${t("nav.box")}</span><span class="count">${apps.length}</span></a>
-    <a href="#/offers"${current(offers)}>${icon("search", 18)}<span>${t("nav.offers")}</span></a>
+    <a href="#/"${current(!NAV.some(([key]) => key === page) && page !== "stats")}>${icon("inbox", 18)}<span class="grow">${t("nav.box")}</span><span class="count">${apps.length}</span></a>
+    ${links}
+    ${me?.admin ? `<a href="#/stats"${current(page === "stats")}>${icon("chart", 18)}<span>${t("nav.stats")}</span></a>` : ""}
     <a href="#/signout">${icon("back", 18)}<span>${t("nav.signOut")}</span></a>` : "";
   document.getElementById("lang").innerHTML = Object.keys(LOCALES)
     .map((code) => `<button type="button" data-lang="${code}" aria-pressed="${code === lang}">${code.toUpperCase()}</button>`)
@@ -115,6 +135,7 @@ document.getElementById("lang").onclick = (e) => {
   const code = e.target.dataset.lang;
   if (!code) return;
   setLang(code);
+  track("lang_changed", { to: code });
   renderNav();
   rerender();
 };
@@ -127,10 +148,20 @@ function route() {
   renderNav();
   if (!userId) return showLogin();
   if (page === "signout") {
+    track("signed_out");
+    flushEvents();
     location.hash = "#/";
     return authApi.signOut();
   }
+  track("$pageview", { page: pageName(location.hash) });
+  renderConsent();
   if (page === "offers") return showOfferSearch();
+  if (page === "reply") return showReply();
+  if (page === "assistant") return showAssistant();
+  if (page === "write") return showWrite(id, sub);
+  if (page === "profile") return showProfile();
+  if (page === "stats") return showStats();
+  if (page === "a" && sub === "reply") return showReply(id);
   if (page === "new") return showNew();
   if (page === "a" && sub === "edit") return showEdit(id);
   if (page === "a") return showDetail(id);
@@ -169,6 +200,7 @@ function renderBox() {
     <div class="row">
       <div class="col-main">${logo(a.company)}
         <a class="row-link" href="#/a/${a.id}"><strong>${esc(a.company)}</strong><span>${esc(a.jobTitle || (a.type === "spontaneous" ? t("type.spontaneous") : ""))}</span></a>
+        ${nextStepTag(a)}
       </div>
       <div class="col-status">${statusTag(a.status)}</div>
       <div class="col-date">${fmtDate(a.lastStatusChangeAt)}</div>
@@ -185,6 +217,7 @@ function renderBox() {
           </button>
           ${box.menuOpen ? `<div class="menu" role="group" aria-label="${t("filter.group")}">${filters}</div>` : ""}
         </div>
+        <a class="btn" href="#/reply">${icon("reply")}<span>${t("nav.reply")}</span></a>
         <a class="btn btn-primary" href="#/new">${icon("plus", 16, 'stroke="currentColor" stroke-width="2.25"')}<span>${t("box.new")}</span></a>
       </div>
     </header>
@@ -229,14 +262,27 @@ async function showDetail(id) {
     return;
   }
   const expanded = { letter: false };
-  rerender = () => renderDetail(app, expanded);
+  const prep = { loading: false, error: "" };
+  rerender = () => renderDetail(app, expanded, prep);
   rerender();
-  view.onclick = (e) => {
+  view.onclick = async (e) => {
     if (e.target.closest("[data-expand-letter]")) {
       expanded.letter = true;
       rerender();
     }
+    if (e.target.closest("[data-prep]")) {
+      const updated = await runPrep(app, prep, rerender);
+      if (updated) app = updated;
+      rerender();
+    }
+    if (e.target.closest("[data-copy-prep]")) navigator.clipboard.writeText(app.prep.text);
   };
+  if (location.hash.endsWith("/prep") || sessionStorage.getItem("autoPrep") === id) {
+    sessionStorage.removeItem("autoPrep");
+    const updated = await runPrep(app, prep, rerender);
+    if (updated) app = updated;
+    rerender();
+  }
 }
 
 function paras(text) {
@@ -336,7 +382,7 @@ function row(...cards) {
   return html ? `<div class="cards">${html}</div>` : "";
 }
 
-function renderDetail(app, expanded) {
+function renderDetail(app, expanded, prep = {}) {
   const regular = app.type === "regular";
   const dates = [t("detail.updated", { date: fmtDate(app.lastStatusChangeAt) })];
   if (app.sentAt) dates.push(t("detail.sent", { date: fmtDate(app.sentAt) }));
@@ -366,7 +412,15 @@ function renderDetail(app, expanded) {
         <a class="btn" href="#/a/${app.id}/edit">${icon("edit")}${t("detail.edit")}</a>
       </div>
     </header>
-    ${blocks.filter(Boolean).join("")}`;
+    ${nextStepBanner(app)}
+    <div class="actions">
+      <a class="btn" href="#/a/${app.id}/reply">${icon("reply")}${t("reply.add")}</a>
+      ${regular ? `<a class="btn" href="#/write/letter/${app.id}">${icon("pen")}${t("write.letter")}</a>` : ""}
+      <a class="btn" href="#/write/email/${app.id}">${icon("mail")}${t("write.email")}</a>
+    </div>
+    ${prepCard(app, prep)}
+    ${blocks.filter(Boolean).join("")}
+    ${repliesCard(app)}`;
 }
 
 // ---------- Formulaire (création et modification) ----------
@@ -845,12 +899,20 @@ function hostOf(url) {
 
 // ---------- Connexion ----------
 
-function onAuth(user) {
+async function onAuth(user) {
   const id = user ? user.uid : null;
   if (id === userId) return; // simple renouvellement du jeton
   userId = id;
   apps = [];
   appsLoaded = false;
+  me = null;
+  tracker.enabled = false;
+  if (userId) {
+    try {
+      me = await api("/api/me");
+      tracker.enabled = me.analytics === "yes";
+    } catch {}
+  }
   route();
   if (userId && location.hash.split("/")[1]) loadApps().catch(() => {}); // Box charge déjà la liste
 }

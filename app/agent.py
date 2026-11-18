@@ -137,9 +137,9 @@ def _short(results: list[dict]) -> list[dict]:
     return [r | {"snippet": r.get("snippet", "")[:MAX_SNIPPET]} for r in results]
 
 
-async def run(profile: dict, history: list[dict]) -> dict:
+async def run(profile: dict, history: list[dict], lang: str = "fr") -> dict:
     """Fait tourner la conversation en laissant l'IA appeler des outils."""
-    messages = prompts.chat_messages(profile, history)
+    messages = prompts.chat_messages(profile, history, lang)
     ft = ", puis rechercher_offres_france_travail pour compléter" if jobs.is_configured() else ""
     messages[0] = {
         "role": "system",

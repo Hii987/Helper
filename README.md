@@ -10,6 +10,12 @@ Application web pour suivre ses candidatures (emploi, stage, alternance). Chaque
 | **Candidature** | Page de lecture pensée pour répondre à un recruteur : points clés de l'offre d'abord (ou l'e-mail envoyé pour une candidature spontanée), puis l'offre, le CV, le contact, l'e-mail, la lettre. |
 | **Création / modification** | Deux types : à une offre ou spontanée. Seules les bases sont obligatoires ; les sections (lien de l'offre, points clés, CV, lettre, e-mail, contact, section libre) s'ajoutent, se retirent et se réordonnent. **« Fetch and summarize »** lit la page de l'offre et l'IA (**Groq**) remplit les points clés ; un champ inconnu reste vide. |
 | **Offer search** | Recherche d'offres sur le web et via l'API France Travail ; « Track » crée une candidature à partir d'une offre. |
+| **Recruiter reply** | Colle le message d'un recruteur : l'IA en extrait le type de réponse (entretien, test, offre, demande d'infos, refus), la date, l'échéance et le contact. La candidature est retrouvée d'après l'entreprise et le poste (ou créée), puis mise à jour : statut, **prochaine étape** (affichée dans la Box), contact, historique des échanges. |
+| **Préparation d'entretien** | Sur la page d'une candidature, générée automatiquement après une réponse positive : recherches web sur l'entreprise, puis fiche avec la situation, l'entreprise (sourcée), une **analyse détaillée de chaque compétence demandée** face au CV envoyé (ou à celui du profil), un pitch, les questions probables et à poser, une checklist. |
+| **Assistant** | Discussion avec l'IA qui cherche elle-même sur le web : offres, entreprises qui recrutent, salaires, formations. |
+| **Write** | Lettre de motivation (enregistrable dans la candidature), analyse de CV face à une offre, e-mails au recruteur (répondre, accepter, décliner, relancer, remercier), pré-remplis depuis une candidature. |
+| **Profile** | Objectif, compétences et CV (import du texte depuis un PDF), utilisés par l'IA ; choix de partager ou non les statistiques d'usage. |
+| **Statistics** | Réservée aux administrateurs (`ADMIN_UIDS`) : utilisateurs actifs par jour, entonnoir d'utilisation, usage et durée des fonctions IA, pages vues, dernières erreurs. |
 
 ## Installation
 
@@ -47,6 +53,13 @@ La configuration web du projet est dans `static/auth.js`. La connexion par e-mai
 
 Sans elle, Offer search cherche quand même sur le web. Crée une application sur https://francetravail.io, abonne-la à l'API **« Offres d'emploi v2 »** et copie ses identifiants dans `.env`.
 
+### Statistiques d'usage (style PostHog)
+
+À la première connexion, un bandeau demande l'accord de la personne ; sans accord, **rien n'est enregistré**. Avec accord, l'appli enregistre des événements (pages vues, candidature créée, offre résumée, réponse analysée, préparation générée, erreurs, durées des appels IA) dans la collection Firestore `events`, sans jamais de contenu (CV, offres, messages). Le choix se modifie dans Profile.
+
+- **Page Statistics** : mets ton identifiant (affiché en bas de ta page Profile) dans `ADMIN_UIDS` (plusieurs identifiants séparés par des virgules).
+- **PostHog (optionnel)** : crée un projet sur https://posthog.com (hébergement UE conseillé), puis renseigne `POSTHOG_API_KEY` (et `POSTHOG_HOST` si besoin). Les mêmes événements y sont envoyés par le serveur ; tu profites alors de ses tableaux de bord, entonnoirs et cohortes.
+
 ## Déploiement (Cloud Run + Firebase Hosting)
 
 Prérequis : plan **Blaze** (Cloud Run l'exige) ; pense à une alerte de budget. Le serveur tourne sur Cloud Run, Firebase Hosting le sert sur https://helper-job-search-center.web.app. Sur Cloud Run, pas de fichier de clé : le serveur accède à Firestore avec le compte de service par défaut.
@@ -67,7 +80,7 @@ gcloud run deploy job-search-center --source . --region europe-west1 --allow-una
 firebase deploy --only hosting
 ```
 
-Pour France Travail, ajoute `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET` de la même façon.
+Pour France Travail, ajoute `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET` de la même façon. Pour les statistiques, ajoute `ADMIN_UIDS=<ton uid>` à `--set-env-vars`, et la clé PostHog en secret si tu l'utilises (`--set-secrets POSTHOG_API_KEY=posthog-api-key:latest`).
 
 ## Tests
 
@@ -80,16 +93,20 @@ pytest
 ```
 app/
   main.py      # routes FastAPI (vérifie le jeton Firebase du cookie __session)
-  store.py     # Firestore : candidatures et fichiers
+  store.py     # Firestore : candidatures, fichiers, profils, événements
   offer.py     # lecture d'une offre + résumé en points clés par l'IA
+  replies.py   # réponses de recruteurs → mise à jour de la candidature ; préparation d'entretien
+  agent.py     # assistant avec outils de recherche web (function calling)
+  prompts.py   # prompts (assistant, lettre, CV, e-mails, réponses, préparation)
+  analytics.py # statistiques d'usage : consentement, événements, PostHog, agrégats
   llm.py       # client Groq
   websearch.py # recherche web (DuckDuckGo) et lecture de pages
   jobs.py      # offres France Travail + liens externes
-static/        # interface web (HTML/CSS/JS sans build, textes dans i18n.js, connexion dans auth.js)
+static/        # interface web sans build : app.js (Box, candidatures, offres), ai.js (pages IA),
+               # stats.js (Statistics), track.js (envoi des événements), i18n.js (textes EN/FR), auth.js
 tests/
-deprecated/    # ancien assistant, lettres, e-mails, préparation d'entretien (non branché, gardé pour réutilisation)
 ```
 
 ## Confidentialité
 
-Les candidatures et fichiers sont dans ton projet Firebase, rattachés au compte qui les a créés. Le texte d'une offre est envoyé à Groq uniquement quand tu cliques sur « Fetch and summarize ».
+Les candidatures et fichiers sont dans ton projet Firebase, rattachés au compte qui les a créés. Les textes (offre, message de recruteur, profil, CV) sont envoyés à Groq uniquement quand tu utilises une fonction IA. Les statistiques d'usage ne sont collectées qu'avec ton accord et ne contiennent aucun contenu.

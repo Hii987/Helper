@@ -1,4 +1,4 @@
-"""Stockage Firestore : candidatures et fichiers PDF.
+"""Stockage Firestore : candidatures, fichiers PDF, profils et événements d'usage.
 
 Les PDF sont découpés en morceaux (un document par morceau) pour rester sous la limite
 de 1 Mio par document Firestore, sans passer par Cloud Storage (payant).
@@ -80,3 +80,30 @@ def delete_file(file_id: str) -> None:
     for chunk in ref.collection("chunks").stream():
         chunk.reference.delete()
     ref.delete()
+
+
+# ---------- Profil ----------
+
+def get_profile(uid: str) -> dict:
+    doc = _db().collection("profiles").document(uid).get()
+    return doc.to_dict() if doc.exists else {}
+
+
+def save_profile(uid: str, data: dict) -> dict:
+    _db().collection("profiles").document(uid).set(data, merge=True)
+    return get_profile(uid)
+
+
+# ---------- Événements (statistiques d'usage) ----------
+
+def add_events(events: list[dict]) -> None:
+    batch = _db().batch()
+    for event in events:
+        batch.set(_db().collection("events").document(), event)
+    batch.commit()
+
+
+def list_events(since: str, limit: int = 20000) -> list[dict]:
+    query = (_db().collection("events").where(filter=firestore.FieldFilter("at", ">=", since))
+             .order_by("at", direction=firestore.Query.DESCENDING).limit(limit))
+    return [d.to_dict() for d in query.stream()]

@@ -32,21 +32,25 @@ def _profile_block(profile: dict) -> str:
     return "Profil de la personne :\n" + "\n".join(parts)
 
 
-def system_message(profile: dict) -> dict:
-    return {"role": "system", "content": f"{SYSTEM_BASE}\n\n{_profile_block(profile)}"}
+LANGUAGES = {"fr": "Réponds toujours en français.", "en": "Always answer in English."}
 
 
-def chat_messages(profile: dict, history: list[dict]) -> list[dict]:
+def system_message(profile: dict, lang: str = "fr") -> dict:
+    language = LANGUAGES.get(lang, LANGUAGES["fr"])
+    return {"role": "system", "content": f"{SYSTEM_BASE} {language}\n\n{_profile_block(profile)}"}
+
+
+def chat_messages(profile: dict, history: list[dict], lang: str = "fr") -> list[dict]:
     # On ne garde que les rôles attendus et les derniers messages.
     clean = [
         {"role": m["role"], "content": m["content"]}
         for m in history
         if m.get("role") in ("user", "assistant") and m.get("content")
     ]
-    return [system_message(profile)] + clean[-MAX_HISTORY:]
+    return [system_message(profile, lang)] + clean[-MAX_HISTORY:]
 
 
-def cover_letter_messages(profile: dict, offer: str, company: str, extra: str) -> list[dict]:
+def cover_letter_messages(profile: dict, offer: str, company: str, extra: str, lang: str = "fr") -> list[dict]:
     prompt = (
         "Rédige une lettre de motivation personnalisée (250 à 350 mots) pour l'offre ci-dessous. "
         "Appuie-toi uniquement sur le profil fourni ; mets entre [crochets] ce qui doit être complété. "
@@ -56,10 +60,10 @@ def cover_letter_messages(profile: dict, offer: str, company: str, extra: str) -
         f"Consignes supplémentaires : {extra or 'aucune'}\n\n"
         f"Offre :\n{offer}"
     )
-    return [system_message(profile), {"role": "user", "content": prompt}]
+    return [system_message(profile, lang), {"role": "user", "content": f"{prompt}\n\n{LANGUAGES.get(lang, LANGUAGES['fr'])}"}]
 
 
-def cv_review_messages(profile: dict, offer: str) -> list[dict]:
+def cv_review_messages(profile: dict, offer: str, lang: str = "fr") -> list[dict]:
     target = f"pour cette offre :\n{offer}" if offer.strip() else "de façon générale."
     prompt = (
         "Analyse mon CV et propose des améliorations concrètes " + target + "\n\n"
@@ -69,7 +73,7 @@ def cv_review_messages(profile: dict, offer: str) -> list[dict]:
         "3. Mots-clés de l'offre absents du CV (si une offre est fournie)\n"
         "4. Une proposition de titre et d'accroche de CV"
     )
-    return [system_message(profile), {"role": "user", "content": prompt}]
+    return [system_message(profile, lang), {"role": "user", "content": f"{prompt}\n\n{LANGUAGES.get(lang, LANGUAGES['fr'])}"}]
 
 
 EMAIL_GOALS = {
@@ -81,7 +85,7 @@ EMAIL_GOALS = {
 }
 
 
-def email_messages(profile: dict, received: str, goal: str, tone: str, extra: str) -> list[dict]:
+def email_messages(profile: dict, received: str, goal: str, tone: str, extra: str, lang: str = "fr") -> list[dict]:
     goal_text = EMAIL_GOALS.get(goal, EMAIL_GOALS["reply"])
     prompt = (
         f"Rédige un e-mail professionnel pour {goal_text}. Ton : {tone or 'professionnel et chaleureux'}. "
@@ -90,7 +94,7 @@ def email_messages(profile: dict, received: str, goal: str, tone: str, extra: st
         f"Précisions : {extra or 'aucune'}\n\n"
         f"Mail reçu / contexte :\n{received or '(aucun mail reçu, il s’agit d’un premier envoi)'}"
     )
-    return [system_message(profile), {"role": "user", "content": prompt}]
+    return [system_message(profile, lang), {"role": "user", "content": f"{prompt}\n\n{LANGUAGES.get(lang, LANGUAGES['fr'])}"}]
 
 
 # ---------- Réponses de recruteurs et préparation d'entretien ----------
@@ -122,7 +126,7 @@ def recruiter_reply_messages(message: str, today: str, known: str) -> list[dict]
     return [{"role": "system", "content": SYSTEM_BASE}, {"role": "user", "content": prompt}]
 
 
-def interview_prep_messages(profile: dict, application: dict, situation: str, research: str) -> list[dict]:
+def interview_prep_messages(profile: dict, application: dict, situation: str, research: str, lang: str = "fr") -> list[dict]:
     offer = (application.get("offer_text") or "").strip()[:MAX_OFFER_TEXT]
     prompt = (
         "Prépare une fiche de préparation d'entretien complète et approfondie pour cette candidature.\n\n"
@@ -146,7 +150,8 @@ def interview_prep_messages(profile: dict, application: dict, situation: str, re
         "- Dans les exemples STAR, le résultat (R) chiffré doit venir de mon profil ; sinon écris [résultat à compléter].\n"
         "- Sur l'entreprise, ne présente comme fait que ce qui vient des recherches ci-dessus, avec le lien. "
         "Si elles sont vides, dis-le, et signale chaque information issue de tes connaissances générales par « (à vérifier) ».\n"
-        "- Sois dense et concret ; utilise un tableau seulement pour la partie 3.\n\n"
+        "- Sois dense et concret ; utilise un tableau seulement pour la partie 3.\n"
+        "- Écris les titres et tout le contenu dans la langue de réponse demandée.\n\n"
         "Structure ta réponse avec ces titres Markdown :\n"
         "## 1. Situation\nType d'échange, date, interlocuteurs, ce qui est attendu de moi.\n"
         "## 2. L'entreprise\nActivité, produits/clients, taille, actualités récentes, culture et valeurs. "
@@ -167,4 +172,4 @@ def interview_prep_messages(profile: dict, application: dict, situation: str, re
         "## 7. Points de vigilance et checklist\nLacunes à assumer, sujets sensibles (salaire, mobilité, "
         "disponibilités) et checklist pratique pour la veille de l'entretien."
     )
-    return [system_message(profile), {"role": "user", "content": prompt}]
+    return [system_message(profile, lang), {"role": "user", "content": f"{prompt}\n\n{LANGUAGES.get(lang, LANGUAGES['fr'])}"}]

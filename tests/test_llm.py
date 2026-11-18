@@ -52,3 +52,44 @@ def test_gives_up_with_clear_message(monkeypatch, fast):
     assert "Requests rate limit exceeded" in str(exc.value)
     assert fast == [1, 1, 1]
 
+
+def test_json_mode_and_max_tokens(monkeypatch, fast):
+    sent = []
+
+    async def fake_post(payload, headers):
+        sent.append(payload)
+        return _resp(200, OK)
+
+    monkeypatch.setattr(llm, "_post", fake_post)
+    asyncio.run(llm.chat([{"role": "user", "content": "json"}], json_mode=True, max_tokens=3000))
+    asyncio.run(llm.chat([{"role": "user", "content": "x"}]))
+    assert sent[0]["response_format"] == {"type": "json_object"} and sent[0]["max_tokens"] == 3000
+    assert "response_format" not in sent[1]
+
+
+def test_degenerate_answer_is_retried(monkeypatch, fast):
+    answers = ["## 1. Situation\n" + " " * 5000, "## 1. Situation\nOK"]
+
+    async def fake_post(payload, headers):
+        content = answers.pop(0)
+        return _resp(200, {"choices": [{"message": {"role": "assistant", "content": content}}]})
+
+    monkeypatch.setattr(llm, "_post", fake_post)
+    assert asyncio.run(llm.chat([{"role": "user", "content": "x"}])) == "## 1. Situation\nOK"
+
+
+def test_degenerate_twice_gives_clear_error(monkeypatch, fast):
+    async def fake_post(payload, headers):
+        return _resp(200, {"choices": [{"message": {"role": "assistant", "content": " " * 500}}]})
+
+    monkeypatch.setattr(llm, "_post", fake_post)
+    with pytest.raises(llm.LLMError):
+        asyncio.run(llm.chat([{"role": "user", "content": "x"}]))
+    assert not llm._degenerate("| --- | --- |\n" + "-" * 80)
+def test_invalid_tool_call_raises_specific_error(monkeypatch, fast):
+    async def fake_post(payload, headers):
+        return _resp(400, {"error": {"message": "Tool call validation failed: attempted to call tool 'ouvrir_page'"}})
+
+    monkeypatch.setattr(llm, "_post", fake_post)
+    with pytest.raises(llm.ToolCallError):
+        asyncio.run(llm.complete([{"role": "user", "content": "x"}], tools=[{"type": "function"}]))

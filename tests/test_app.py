@@ -6,13 +6,13 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app import jobs, llm, main, store, websearch
+from app import analytics, jobs, llm, main, store, websearch
 
 
 @pytest.fixture
 def client(monkeypatch):
     """Remplace Firestore par un stockage en mémoire."""
-    apps, files = {}, {}
+    apps, files, profiles, events = {}, {}, {}, []
 
     def create(data):
         app_id = f"a{len(apps) + 1}"
@@ -34,14 +34,19 @@ def client(monkeypatch):
         "get_file": lambda k: files.get(k),
         "get_file_meta": lambda k: files[k][0] if k in files else None,
         "delete_file": lambda k: files.pop(k),
+        "get_profile": lambda uid: dict(profiles.get(uid, {})),
+        "save_profile": lambda uid, d: profiles.setdefault(uid, {}).update(d) or dict(profiles[uid]),
+        "add_events": events.extend,
+        "list_events": lambda since, limit=20000: [e for e in events if e["at"] >= since],
     }
     for name, fn in fake.items():
         monkeypatch.setattr(store, name, fn)
     monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_ID", raising=False)
     monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_SECRET", raising=False)
     main.app.dependency_overrides[main.current_user] = lambda: "u1"
+    analytics._consent.clear()
     with TestClient(main.app) as c:
-        c.files = files
+        c.files, c.apps, c.profiles, c.events = files, apps, profiles, events
         yield c
     main.app.dependency_overrides.clear()
 

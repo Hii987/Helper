@@ -23,6 +23,10 @@ class LLMError(Exception):
     """Erreur lisible renvoyée à l'utilisateur."""
 
 
+class ToolCallError(LLMError):
+    """Le modèle a tenté d'appeler un outil inexistant ou avec des arguments invalides."""
+
+
 def is_configured() -> bool:
     return bool(os.getenv("GROQ_API_KEY"))
 
@@ -98,6 +102,8 @@ async def complete(messages: list[dict], temperature: float = 0.5, tools: list[d
             "Requête trop volumineuse pour le plan gratuit Groq (limite de tokens par minute). "
             f"Raccourcis ton message ou ton CV, ou change de modèle via GROQ_MODEL. Détail : {_detail(resp)}"
         )
+    if resp.status_code == 400 and "tool" in _detail(resp).lower():
+        raise ToolCallError(f"Appel d'outil refusé par Groq : {_detail(resp)}")
     if resp.status_code >= 400:
         raise LLMError(f"Erreur Groq {resp.status_code} : {_detail(resp)}")
 
