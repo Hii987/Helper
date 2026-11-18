@@ -24,6 +24,16 @@ JOB_SITES = (
     "jobteaser.com", "apec.fr", "meteojob.com",
 )
 
+# Zones de la page qui contiennent l'offre, par site : le reste (menus, offres
+# similaires…) n'est pas envoyé à l'IA. Les autres sites gardent toute la page.
+OFFER_PATTERNS = {
+    "linkedin.com": (
+        r'<h1[^>]*top-card-layout__title.*?</h4>',
+        r'<div class="description__text.*?description__job-criteria-list.*?</ul>',
+    ),
+    "hellowork.com": (r'<h1 id="main-content".*?(?=Ces offres pourraient)',),
+}
+
 
 class WebSearchError(Exception):
     pass
@@ -153,4 +163,16 @@ async def fetch_page(url: str, max_chars: int = 6000) -> dict:
     if "html" not in resp.headers.get("content-type", "html"):
         raise WebSearchError("Ce lien ne pointe pas vers une page web.")
     title, text = html_to_text(resp.text)
+    offer = offer_html(resp.url.host, resp.text)
+    if offer:
+        text = html_to_text(offer)[1]
     return {"url": str(resp.url), "title": title, "text": text[:max_chars]}
+
+
+def offer_html(hostname: str, page: str) -> str:
+    """HTML de l'offre seule si le site est connu et ses zones trouvées, sinon ""."""
+    for site, patterns in OFFER_PATTERNS.items():
+        if hostname == site or hostname.endswith("." + site):
+            matches = [re.search(p, page, re.S) for p in patterns]
+            return "".join(m.group(0) for m in matches if m)
+    return ""
