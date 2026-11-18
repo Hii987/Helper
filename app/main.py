@@ -2,15 +2,18 @@
 
 import asyncio
 import io
+import os
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
 import pypdfium2 as pdfium
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
 from pydantic import BaseModel
 
 load_dotenv()
@@ -44,6 +47,16 @@ def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+def current_user(session: str = Cookie("", alias="__session")) -> str:
+    """Vérifie le jeton Firebase du cookie __session (seul cookie transmis par Firebase Hosting)."""
+    try:
+        claims = id_token.verify_firebase_token(session, google_requests.Request(),
+                                                audience=os.getenv("FIREBASE_PROJECT_ID"))
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Please sign in.") from exc
+    return claims["sub"]
+
+
 # ---------- Candidatures ----------
 
 def _validate(data: ApplicationIn) -> None:
@@ -61,33 +74,39 @@ def _file_ids(sections: list[dict]) -> set[str]:
     return {s["file"]["id"] for s in sections if (s.get("file") or {}).get("id")}
 
 
+def _delete_files(file_ids: set[str], uid: str) -> None:
+    for file_id in file_ids:
+        if (store.get_file_meta(file_id) or {}).get("uid") == uid:
+            store.delete_file(file_id)
+
+
 @app.get("/api/applications")
-def list_applications():
-    return store.list_applications()
+def list_applications(uid: str = Depends(current_user)):
+    return store.list_applications(uid)
 
 
 @app.get("/api/applications/{app_id}")
-def get_application(app_id: str):
+def get_application(app_id: str, uid: str = Depends(current_user)):
     application = store.get_application(app_id)
-    if application is None:
+    if application is None or application.get("uid") != uid:
         raise HTTPException(status_code=404, detail="Application not found.")
     return application
 
 
 @app.post("/api/applications", status_code=201)
-def create_application(data: ApplicationIn):
+def create_application(data: ApplicationIn, uid: str = Depends(current_user)):
     _validate(data)
     now = store.now()
-    record = {**data.model_dump(), "createdAt": now, "lastStatusChangeAt": now}
+    record = {**data.model_dump(), "uid": uid, "createdAt": now, "lastStatusChangeAt": now}
     if data.status != "notsent":
         record["sentAt"] = now
     return store.create_application(record)
 
 
 @app.put("/api/applications/{app_id}")
-def update_application(app_id: str, data: ApplicationIn):
+def update_application(app_id: str, data: ApplicationIn, uid: str = Depends(current_user)):
     _validate(data)
-    old = get_application(app_id)
+    old = get_application(app_id, uid)
     if data.type != old["type"]:
         raise HTTPException(status_code=400, detail="The type of an application cannot change.")
     record = {k: v for k, v in old.items() if k != "id"} | data.model_dump()
@@ -96,16 +115,14 @@ def update_application(app_id: str, data: ApplicationIn):
         if data.status != "notsent" and not old.get("sentAt"):
             record["sentAt"] = record["lastStatusChangeAt"]
     saved = store.update_application(app_id, record)
-    for file_id in _file_ids(old["sections"]) - _file_ids(data.sections):
-        store.delete_file(file_id)
+    _delete_files(_file_ids(old["sections"]) - _file_ids(data.sections), uid)
     return saved
 
 
 @app.delete("/api/applications/{app_id}", status_code=204)
-def delete_application(app_id: str):
-    application = get_application(app_id)
-    for file_id in _file_ids(application["sections"]):
-        store.delete_file(file_id)
+def delete_application(app_id: str, uid: str = Depends(current_user)):
+    application = get_application(app_id, uid)
+    _delete_files(_file_ids(application["sections"]), uid)
     store.delete_application(app_id)
 
 
@@ -125,20 +142,20 @@ def _read_pdf(content: bytes) -> tuple[int, bytes]:
 
 
 @app.post("/api/files", status_code=201)
-async def upload_file(request: Request, name: str):
+async def upload_file(request: Request, name: str, uid: str = Depends(current_user)):
     content = await request.body()
     if len(content) > MAX_FILE_BYTES:
         raise HTTPException(status_code=413, detail="The file is larger than 10 MB.")
     pages, preview = _read_pdf(content)
     meta = {"name": name, "pages": pages, "addedAt": store.now()}
-    file_id = store.save_file({**meta, "preview": preview}, content)
+    file_id = store.save_file({**meta, "uid": uid, "preview": preview}, content)
     return {**meta, "id": file_id}
 
 
 @app.get("/api/files/{file_id}")
-def download_file(file_id: str, download: bool = False):
+def download_file(file_id: str, download: bool = False, uid: str = Depends(current_user)):
     found = store.get_file(file_id)
-    if found is None:
+    if found is None or found[0].get("uid") != uid:
         raise HTTPException(status_code=404, detail="File not found.")
     meta, content = found
     disposition = "attachment" if download else "inline"
@@ -147,16 +164,16 @@ def download_file(file_id: str, download: bool = False):
 
 
 @app.get("/api/files/{file_id}/preview")
-def file_preview(file_id: str):
+def file_preview(file_id: str, uid: str = Depends(current_user)):
     meta = store.get_file_meta(file_id)
-    if meta is None:
+    if meta is None or meta.get("uid") != uid:
         raise HTTPException(status_code=404, detail="File not found.")
     return Response(meta["preview"], media_type="image/png")
 
 
 # ---------- Offres ----------
 
-@app.post("/api/offer/summary")
+@app.post("/api/offer/summary", dependencies=[Depends(current_user)])
 async def summarize_offer(req: OfferRequest):
     if not req.url.strip() and not req.text.strip():
         raise HTTPException(status_code=400, detail="Give a link or paste the offer text.")
@@ -168,7 +185,7 @@ async def summarize_offer(req: OfferRequest):
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@app.get("/api/jobs")
+@app.get("/api/jobs", dependencies=[Depends(current_user)])
 async def search_jobs(q: str = "", location: str = "", department: str = "", kind: str = "emploi"):
     if kind not in jobs.KINDS:
         raise HTTPException(status_code=400, detail="Unknown contract type.")

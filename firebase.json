@@ -4,5 +4,14 @@
     "location": "eur3",
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
+  },
+  "auth": {
+    "providers": {
+      "emailPassword": true
+    }
+  },
+  "hosting": {
+    "public": "static",
+    "rewrites": [{ "source": "**", "run": { "serviceId": "job-search-center", "region": "europe-west1" } }]
   }
 }

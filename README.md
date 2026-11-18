@@ -1,6 +1,6 @@
 # Helper — Job search center
 
-Application web locale pour suivre ses candidatures (emploi, stage, alternance). Interface en anglais ou en français (bouton EN / FR dans la barre latérale).
+Application web pour suivre ses candidatures (emploi, stage, alternance). Chaque utilisateur se connecte (Firebase Authentication) et ne voit que ses propres candidatures et fichiers. Interface en anglais ou en français (bouton EN / FR dans la barre latérale).
 
 ## Fonctionnalités
 
@@ -34,6 +34,10 @@ Les candidatures et les PDF sont stockés dans Firestore. Les PDF sont découpé
 3. *Paramètres du projet → Comptes de service → Générer une nouvelle clé privée* : garde le fichier JSON hors du dépôt.
 4. Dans `.env` : `FIREBASE_PROJECT_ID=<id du projet>` et `GOOGLE_APPLICATION_CREDENTIALS=<chemin du JSON>`.
 
+### Connexion (Firebase Authentication)
+
+La configuration web du projet est dans `static/auth.js`. La connexion par e-mail est activée ; pour « Continue with Google », active le fournisseur Google dans la console : *Authentication → Sign-in method*.
+
 ### Clé Groq (gratuite)
 
 1. Crée une clé sur https://console.groq.com/keys.
@@ -42,6 +46,28 @@ Les candidatures et les PDF sont stockés dans Firestore. Les PDF sont découpé
 ### API France Travail (optionnelle, gratuite)
 
 Sans elle, Offer search cherche quand même sur le web. Crée une application sur https://francetravail.io, abonne-la à l'API **« Offres d'emploi v2 »** et copie ses identifiants dans `.env`.
+
+## Déploiement (Cloud Run + Firebase Hosting)
+
+Prérequis : plan **Blaze** (Cloud Run l'exige) ; pense à une alerte de budget. Le serveur tourne sur Cloud Run, Firebase Hosting le sert sur https://helper-job-search-center.web.app. Sur Cloud Run, pas de fichier de clé : le serveur accède à Firestore avec le compte de service par défaut.
+
+```bash
+gcloud auth login
+gcloud config set project helper-job-search-center
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com
+
+# Clé Groq en secret (une seule fois)
+printf %s "<clé Groq>" | gcloud secrets create groq-api-key --data-file=-
+gcloud secrets add-iam-policy-binding groq-api-key --role=roles/secretmanager.secretAccessor \
+  --member=serviceAccount:263454823776-compute@developer.gserviceaccount.com
+
+# À chaque mise à jour
+gcloud run deploy job-search-center --source . --region europe-west1 --allow-unauthenticated \
+  --set-env-vars FIREBASE_PROJECT_ID=helper-job-search-center --set-secrets GROQ_API_KEY=groq-api-key:latest
+firebase deploy --only hosting
+```
+
+Pour France Travail, ajoute `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET` de la même façon.
 
 ## Tests
 
@@ -53,17 +79,17 @@ pytest
 
 ```
 app/
-  main.py      # routes FastAPI
+  main.py      # routes FastAPI (vérifie le jeton Firebase du cookie __session)
   store.py     # Firestore : candidatures et fichiers
   offer.py     # lecture d'une offre + résumé en points clés par l'IA
   llm.py       # client Groq
   websearch.py # recherche web (DuckDuckGo) et lecture de pages
   jobs.py      # offres France Travail + liens externes
-static/        # interface web (HTML/CSS/JS sans dépendance, textes dans i18n.js)
+static/        # interface web (HTML/CSS/JS sans build, textes dans i18n.js, connexion dans auth.js)
 tests/
 deprecated/    # ancien assistant, lettres, e-mails, préparation d'entretien (non branché, gardé pour réutilisation)
 ```
 
 ## Confidentialité
 
-Les candidatures et fichiers sont dans ton projet Firebase. Le texte d'une offre est envoyé à Groq uniquement quand tu cliques sur « Fetch and summarize ».
+Les candidatures et fichiers sont dans ton projet Firebase, rattachés au compte qui les a créés. Le texte d'une offre est envoyé à Groq uniquement quand tu cliques sur « Fetch and summarize ».

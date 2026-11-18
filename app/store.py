@@ -24,8 +24,9 @@ def now() -> str:
 
 # ---------- Candidatures ----------
 
-def list_applications() -> list[dict]:
-    return [{**d.to_dict(), "id": d.id} for d in _db().collection("applications").stream()]
+def list_applications(uid: str) -> list[dict]:
+    query = _db().collection("applications").where(filter=firestore.FieldFilter("uid", "==", uid))
+    return [{**d.to_dict(), "id": d.id} for d in query.stream()]
 
 
 def get_application(app_id: str) -> dict | None:

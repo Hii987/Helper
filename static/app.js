@@ -24,6 +24,7 @@ const ICONS = {
 const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#9CA3AF">'
   + [6, 12, 18].map((y) => `<circle cx="9" cy="${y}" r="1.6"/><circle cx="15" cy="${y}" r="1.6"/>`).join("") + "</svg>";
 
+let userId; // undefined tant que Firebase n'a pas répondu, null si déconnecté
 let apps = [];
 let appsLoaded = false;
 let rerender = () => {};
@@ -101,9 +102,10 @@ async function loadApps() {
 function renderNav() {
   const offers = location.hash.startsWith("#/offers");
   const current = (on) => (on ? ' aria-current="page"' : "");
-  document.getElementById("nav").innerHTML = `
+  document.getElementById("nav").innerHTML = userId ? `
     <a href="#/"${current(!offers)}>${icon("inbox", 18)}<span class="grow">${t("nav.box")}</span><span class="count">${apps.length}</span></a>
-    <a href="#/offers"${current(offers)}>${icon("search", 18)}<span>${t("nav.offers")}</span></a>`;
+    <a href="#/offers"${current(offers)}>${icon("search", 18)}<span>${t("nav.offers")}</span></a>
+    <a href="#/signout">${icon("back", 18)}<span>${t("nav.signOut")}</span></a>` : "";
   document.getElementById("lang").innerHTML = Object.keys(LOCALES)
     .map((code) => `<button type="button" data-lang="${code}" aria-pressed="${code === lang}">${code.toUpperCase()}</button>`)
     .join("");
@@ -123,6 +125,11 @@ function route() {
   view.onclick = view.oninput = view.onchange = view.onsubmit = null;
   if (page !== "new" && sub !== "edit") form = null;
   renderNav();
+  if (!userId) return showLogin();
+  if (page === "signout") {
+    location.hash = "#/";
+    return authApi.signOut();
+  }
   if (page === "offers") return showOfferSearch();
   if (page === "new") return showNew();
   if (page === "a" && sub === "edit") return showEdit(id);
@@ -798,5 +805,43 @@ function hostOf(url) {
   }
 }
 
-route();
-if (location.hash.split("/")[1]) loadApps().catch(() => {}); // Box charge déjà la liste
+// ---------- Connexion ----------
+
+function onAuth(user) {
+  const id = user ? user.uid : null;
+  if (id === userId) return; // simple renouvellement du jeton
+  userId = id;
+  apps = [];
+  appsLoaded = false;
+  route();
+  if (userId && location.hash.split("/")[1]) loadApps().catch(() => {}); // Box charge déjà la liste
+}
+
+function showLogin() {
+  rerender = showLogin;
+  view.innerHTML = `
+    <h1>${t("auth.title")}</h1>
+    <form class="login">
+      <label class="lbl"><span>${t("auth.email")}</span><input class="field" type="email" name="email" required autocomplete="email"></label>
+      <label class="lbl"><span>${t("auth.password")}</span><input class="field" type="password" name="password" required minlength="6" autocomplete="current-password"></label>
+      <div class="fields">
+        <button class="btn btn-primary" name="signIn">${t("auth.signIn")}</button>
+        <button class="btn" name="signUp">${t("auth.signUp")}</button>
+      </div>
+      <button type="button" class="btn" data-google>${t("auth.google")}</button>
+      <p class="banner error" role="status" hidden></p>
+    </form>`;
+  const error = view.querySelector(".banner");
+  const attempt = (promise) => promise.catch((err) => {
+    error.textContent = err.message;
+    error.hidden = false;
+  });
+  view.onsubmit = (e) => {
+    e.preventDefault();
+    const { email, password } = e.target.elements;
+    attempt(authApi[e.submitter.name](email.value, password.value));
+  };
+  view.onclick = (e) => {
+    if (e.target.closest("[data-google]")) attempt(authApi.google());
+  };
+}

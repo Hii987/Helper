@@ -25,7 +25,7 @@ def client(monkeypatch):
         return file_id
 
     fake = {
-        "list_applications": lambda: [{**d, "id": k} for k, d in apps.items()],
+        "list_applications": lambda uid: [{**d, "id": k} for k, d in apps.items() if d["uid"] == uid],
         "get_application": lambda k: {**apps[k], "id": k} if k in apps else None,
         "create_application": create,
         "update_application": lambda k, d: apps.__setitem__(k, d) or {**d, "id": k},
@@ -39,9 +39,11 @@ def client(monkeypatch):
         monkeypatch.setattr(store, name, fn)
     monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_ID", raising=False)
     monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_SECRET", raising=False)
+    main.app.dependency_overrides[main.current_user] = lambda: "u1"
     with TestClient(main.app) as c:
         c.files = files
         yield c
+    main.app.dependency_overrides.clear()
 
 
 def _pdf() -> bytes:
