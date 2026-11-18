@@ -28,8 +28,9 @@ JOB_SITES = (
 # similaires…) n'est pas envoyé à l'IA. Les autres sites gardent toute la page.
 OFFER_PATTERNS = {
     "linkedin.com": (
-        r'<h1[^>]*top-card-layout__title.*?</h4>',
-        r'<div class="description__text.*?description__job-criteria-list.*?</ul>',
+        r'<h1[^>]*top-card-layout__title.*?(?=<a[^>]*see-who-was-hired|</h4>)',
+        r'<div class="description__text.*?(?=<button)',
+        r'<ul class="description__job-criteria-list.*?</ul>',
     ),
     "hellowork.com": (r'<h1 id="main-content".*?(?=Ces offres pourraient)',),
 }
