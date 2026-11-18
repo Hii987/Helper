@@ -1,7 +1,7 @@
 const view = document.getElementById("view");
 const STATUSES = ["notsent", "sent", "positive", "refused"];
 const LOGO_COLORS = ["#1F2937", "#1E3A5F", "#334155", "#3F3F46", "#44403C", "#164E63"];
-const SECTION_KINDS = ["offerLink", "keyPoints", "cv", "letter", "email", "contact", "custom"];
+const SECTION_KINDS = ["offerLink", "keyPoints", "company", "cv", "letter", "email", "contact", "custom"];
 const DEFAULT_SECTIONS = { regular: ["offerLink", "keyPoints", "cv", "email"], spontaneous: ["email", "cv"] };
 const KEY_FIELDS = ["contract", "salary", "workMode", "experience", "start"];
 const KEY_LISTS = ["responsibilities", "requirements"];
@@ -244,11 +244,21 @@ function keyPointsCard(s) {
   const values = KEY_FIELDS.filter((k) => s[k]).map((k) => kv(t("key." + k), esc(s[k]))).join("");
   const lists = KEY_LISTS.filter((k) => s[k]?.length)
     .map((k) => `<div><div class="micro">${t("key." + k)}</div><ul>${s[k].map((i) => `<li>${esc(i)}</li>`).join("")}</ul></div>`)
-    .join("");
+    .join("") + whyBlock(s.why, "key.whyOffer");
   if (!values && !lists) return "";
   return card(t("section.keyPoints"),
     (values ? `<div class="key-values">${values}</div>` : "") + (lists ? `<div class="key-lists">${lists}</div>` : ""),
     { cls: "key" });
+}
+
+function whyBlock(text, labelKey) {
+  return text ? `<div><div class="micro">${t(labelKey)}</div><div class="prose">${paras(text)}</div></div>` : "";
+}
+
+function companyCard(s) {
+  if (!s || !(s.summary || s.why)) return "";
+  return card(t("section.company"),
+    (s.summary ? `<div class="prose">${paras(s.summary)}</div>` : "") + whyBlock(s.why, "key.whyCompany"));
 }
 
 function offerCard(s) {
@@ -322,9 +332,11 @@ function renderDetail(app, expanded) {
   const reference = [contactCard(section(app, "contact"))];
   const blocks = regular
     ? [keyPointsCard(section(app, "keyPoints") || {}),
+       row(companyCard(section(app, "company"))),
        row(offerCard(section(app, "offerLink")), cvCard(section(app, "cv"), app, "narrowish")),
        row(...reference, emailCard(section(app, "email")), letterCard(section(app, "letter"), expanded.letter), customCards(app))]
     : [emailCard(section(app, "email"), true),
+       row(companyCard(section(app, "company"))),
        row(...reference, cvCard(section(app, "cv"), app), letterCard(section(app, "letter"), expanded.letter), customCards(app))];
 
   view.innerHTML = `
@@ -355,7 +367,8 @@ let prefill = null;
 function newSection(kind, values = {}) {
   const base = {
     offerLink: { url: "", paste: "" },
-    keyPoints: { ...Object.fromEntries([...KEY_FIELDS, ...KEY_LISTS].map((k) => [k, ""])), filledByAi: false },
+    keyPoints: { ...Object.fromEntries([...KEY_FIELDS, ...KEY_LISTS].map((k) => [k, ""])), why: "", filledByAi: false },
+    company: { summary: "", why: "", filledByAi: false },
     cv: {},
     letter: { text: "" },
     email: { to: "", sentAt: "", subject: "", body: "" },
@@ -469,12 +482,17 @@ function sectionBody(s) {
     case "offerLink":
       return `<div class="fields">${input("url", t("form.offerUrl"), { type: "url", value: s.url, sec: id, ph: "https://" })}
           <button class="btn ${s.fetchedAt || form.ai === "done" ? "" : "btn-primary"}" type="button" data-action="fetch" ${busy}>${t(s.fetchedAt || form.ai === "done" ? "form.fetchAgain" : "form.fetch")}</button></div>
+        <label class="check"><input type="checkbox" data-action="with-company" ${form.withCompany ? "checked" : ""} ${busy}>${t("form.withCompany")}</label>
         ${aiBanner("link")}
         ${input("paste", t("form.paste"), { value: s.paste, sec: id, ph: t("form.pastePh"), area: 3 })}`;
     case "keyPoints":
       return `${aiBanner("key")}
         <div class="fields">${KEY_FIELDS.map((k) => input(k, t("key." + k), { value: s[k], sec: id, ph: t("ph." + k), attrs: busy })).join("")}</div>
-        <div class="fields">${KEY_LISTS.map((k) => input(k, t("form." + k), { value: s[k], sec: id, ph: t("ph." + k), attrs: busy, area: 4 })).join("")}</div>`;
+        <div class="fields">${KEY_LISTS.map((k) => input(k, t("form." + k), { value: s[k], sec: id, ph: t("ph." + k), attrs: busy, area: 4 })).join("")}</div>
+        ${input("why", t("form.whyOffer"), { value: s.why, sec: id, ph: t("ph.why"), area: 3 })}`;
+    case "company":
+      return input("summary", t("form.companySummary"), { value: s.summary, sec: id, ph: t("ph.companySummary"), attrs: busy, area: 3 })
+        + input("why", t("form.whyCompany"), { value: s.why, sec: id, ph: t("ph.why"), area: 3 });
     case "cv":
       return dropZone(s, "form.dropCv");
     case "letter":
@@ -594,7 +612,7 @@ function onFormInput(e) {
   const s = findSection(sec);
   if (extra !== undefined) s.extra[extra][key] = e.target.value;
   else s[key] = e.target.value;
-  if (s.kind === "keyPoints") s.filledByAi = false;
+  if ("filledByAi" in s && key !== "why") s.filledByAi = false;
 }
 
 function onFormChange(e) {
@@ -624,6 +642,9 @@ function onFormClick(e) {
       return renderTypeStep();
     case "menu":
       form.menuOpen = !form.menuOpen;
+      break;
+    case "with-company":
+      form.withCompany = el.checked;
       break;
     case "move": {
       const i = list.indexOf(s);
@@ -657,17 +678,23 @@ async function fetchOffer() {
     Object.assign(form, { ai: "error", aiError: t("ai.needInput") });
     return renderForm();
   }
-  const edited = kp && !kp.filledByAi && [...KEY_FIELDS, ...KEY_LISTS].some((k) => kp[k].trim());
+  const co = form.withCompany && section(form, "company");
+  const edited = (kp && !kp.filledByAi && [...KEY_FIELDS, ...KEY_LISTS].some((k) => kp[k].trim()))
+    || (co && !co.filledByAi && co.summary.trim());
   if (edited && !confirm(t("ai.confirmReplace"))) return;
   form.ai = "loading";
   renderForm();
   try {
-    const r = await api("/api/offer/summary", { method: "POST", body: { url: link.url, text: link.paste } });
+    const r = await api("/api/offer/summary", { method: "POST", body: { url: link.url, text: link.paste, withCompany: Boolean(form.withCompany) } });
     Object.assign(link, { rawText: r.rawText, fetchedAt: new Date().toISOString() });
     if (kp) {
       for (const k of KEY_FIELDS) kp[k] = r[k];
       for (const k of KEY_LISTS) kp[k] = r[k].join("\n");
       kp.filledByAi = true;
+    }
+    if (form.withCompany && r.companySummary) {
+      if (!section(form, "company")) form.sections.push(newSection("company"));
+      Object.assign(section(form, "company"), { summary: r.companySummary, filledByAi: true });
     }
     if (!form.company.trim()) form.company = r.company;
     if (!form.jobTitle.trim()) form.jobTitle = r.jobTitle;
