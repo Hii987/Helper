@@ -183,6 +183,8 @@ textarea.field { padding: 10px 12px; min-height: 96px; resize: vertical; line-he
 .field:focus { outline: 2px solid var(--green); outline-offset: 0; border-color: var(--green); }
 .field:disabled { background: var(--hover); color: var(--disabled); }
 .help { font-size: 13px; line-height: 1.5; color: var(--muted); }
+.check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text-2); }
+.check input { width: 18px; height: 18px; margin: 0; accent-color: var(--green); }
 .drop, .file-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 20px; font-size: 14px; color: var(--text-2); }
 .drop { border: 1px dashed var(--dashed); background: var(--subtle); }
 .drop.over { border-color: var(--green); }

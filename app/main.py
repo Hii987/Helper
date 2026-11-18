@@ -22,7 +22,7 @@ from . import jobs, llm, offer, store, websearch  # noqa: E402  (après load_dot
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 MAX_FILE_BYTES = 10_000_000
-SECTION_KINDS = {"offerLink", "keyPoints", "cv", "letter", "email", "contact", "custom"}
+SECTION_KINDS = {"offerLink", "keyPoints", "company", "cv", "letter", "email", "contact", "custom"}
 OFFER_KINDS = {"offerLink", "keyPoints"}
 
 app = FastAPI(title="Helper")
@@ -40,6 +40,7 @@ class ApplicationIn(BaseModel):
 class OfferRequest(BaseModel):
     url: str = ""
     text: str = ""
+    withCompany: bool = False
 
 
 @app.get("/")
@@ -178,7 +179,7 @@ async def summarize_offer(req: OfferRequest):
     if not req.url.strip() and not req.text.strip():
         raise HTTPException(status_code=400, detail="Give a link or paste the offer text.")
     try:
-        return await offer.summarize(req.url, req.text)
+        return await offer.summarize(req.url, req.text, req.withCompany)
     except websearch.WebSearchError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except llm.LLMError as exc:

@@ -121,6 +121,25 @@ def test_offer_summary_from_page(client, monkeypatch):
     assert data["rawText"] == "Offer text"
 
 
+def test_offer_summary_with_company(client, monkeypatch):
+    async def blocked_search(query, max_results=8):
+        assert query == "Halden Labs"
+        raise websearch.WebSearchError("blocked")
+
+    async def fake_chat(messages, temperature=0.5, **kwargs):
+        if "Halden Labs" in messages[0]["content"]:
+            assert "Offer text" in messages[1]["content"]
+            return json.dumps({"summary": "Builds data tools."})
+        return json.dumps({"company": "Halden Labs"})
+
+    monkeypatch.setattr(websearch, "search", blocked_search)
+    monkeypatch.setattr(llm, "chat", fake_chat)
+    without = client.post("/api/offer/summary", json={"text": "Offer text"}).json()
+    assert without["companySummary"] == ""
+    data = client.post("/api/offer/summary", json={"text": "Offer text", "withCompany": True}).json()
+    assert data["companySummary"] == "Builds data tools."
+
+
 def test_offer_summary_errors(client, monkeypatch):
     async def blocked(url, max_chars=6000):
         raise websearch.WebSearchError("Page inaccessible (403).")
