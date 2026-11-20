@@ -117,8 +117,9 @@ JOIN = "Envoie ta candidature à recrutement&#64;agence-lumen.fr ou jobs@gmail.c
 
 def test_find_contact(monkeypatch):
     async def fake_search(query, max_results=8, domains=()):
-        assert query == "Agence Lumen Lille site officiel"
-        return [{"title": "AGENCE LUMEN - Societe.com", "url": "https://www.societe.com/societe/agence-lumen-1.html"},
+        assert query == "Agence Lumen Lille"
+        return [{"title": "Agence Lumen", "url": "https://tavily.com/knowledge/company/abc"},
+                {"title": "AGENCE LUMEN - Societe.com", "url": "https://www.societe.com/societe/agence-lumen-1.html"},
                 {"title": "Agence Lumen | Communication digitale", "url": "https://www.agence-lumen.fr/accueil"}]
 
     pages = {"https://www.agence-lumen.fr/": HOME, "https://www.agence-lumen.fr/contact": CONTACT,
@@ -142,11 +143,37 @@ def test_find_contact(monkeypatch):
 
 
 def test_find_contact_without_website(monkeypatch):
+    queries = []
+
     async def directories_only(query, max_results=8, domains=()):
-        return [{"title": "X - Pappers", "url": "https://www.pappers.fr/entreprise/x"}]
+        queries.append(query)
+        return [{"title": "X - Pappers", "url": "https://www.pappers.fr/entreprise/x"},
+                {"title": "Umt", "url": "https://umet.univ-lille.fr"}]
 
     monkeypatch.setattr(websearch, "search", directories_only)
-    assert asyncio.run(companies.find_contact("X", "Lille"))["website"] == ""
+    assert asyncio.run(companies.find_contact("Umt", "Lille"))["website"] == ""
+    assert queries == ["Umt Lille", "Umt site web entreprise"]  # seconde formulation tentée
+
+
+def test_pick_website_real_cases():
+    # Résultats réels de Tavily (novembre 2026) : sa propre fiche et des agrégateurs titrent avec le nom.
+    ef = [{"url": "https://tavily.com/knowledge/company/gcm07e3iTOLm", "title": "EF INTERNATIONAL"},
+          {"url": "https://www.ef.com/wwen", "title": "EF - Language. Education. Travel."},
+          {"url": "https://www.ef.fr", "title": "EF - Langue. Éducation. Voyage. | EF France"},
+          {"url": "https://www.efacademy.org/en", "title": "International Boarding Schools"}]
+    assert companies.pick_website(ef, "Ef International") == "https://www.ef.fr/"
+    carre = [{"url": "https://tracxn.com/d/companies/carr-noir/x", "title": "Carré Noir - Company Profile"},
+             {"url": "https://rocketreach.co/carre-noir-profile_b5", "title": "Carré Noir Information"},
+             {"url": "https://www.ville-wasquehal.fr", "title": "Accueil - Ville de Wasquehal"}]
+    assert companies.pick_website(carre, "Carre Noir") == ""
+    sopra = [{"url": "https://www.soprasteria.com/", "title": "Sopra Steria"},
+             {"url": "https://www.soprahr.com/fr", "title": "Sopra HR Software"}]
+    assert companies.pick_website(sopra, "Sopra Hr Software") == "https://www.soprahr.com/"
+    havas = [{"url": "https://havasmedianetwork.com", "title": "Havas Media Network"},
+             {"url": "https://www.havas.fr", "title": "Havas: Growth, Powered by Desire"}]
+    # Le site qui reprend le plus de mots du nom (Havas + Media) l'emporte sur celui du groupe.
+    assert companies.pick_website(havas, "Havas Media France") == "https://havasmedianetwork.com/"
+    assert companies.pick_website(havas, "Havas") == "https://www.havas.fr/"
 
 
 def test_contact_and_application_endpoints(client, monkeypatch):  # noqa: F811

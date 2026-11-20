@@ -31,14 +31,21 @@ MAX_ACTIVITIES = 6
 SIZE_MIN = {"00": 0, "01": 1, "02": 3, "03": 6, "11": 10, "12": 20, "21": 50, "22": 100,
             "31": 200, "32": 250, "41": 500, "42": 1000, "51": 2000, "52": 5000, "53": 10000}
 
-# Sites qui parlent des entreprises sans être leur site officiel.
+# Sites qui parlent des entreprises sans être leur site officiel (annuaires, agrégateurs, réseaux, presse).
 DIRECTORIES = (
-    "societe.com", "pappers.fr", "pagesjaunes.fr", "infogreffe.fr", "annuaire-entreprises.data.gouv.fr",
+    "tavily.com", "societe.com", "pappers.fr", "pagesjaunes.fr", "infogreffe.fr", "annuaire-entreprises.data.gouv.fr",
     "verif.com", "manageo.fr", "linkedin.com", "facebook.com", "instagram.com", "indeed.", "glassdoor.",
     "welcometothejungle.com", "hellowork.com", "kompass.com", "corporama.com", "figaro", "wikipedia.org",
-    "lefigaro.fr", "dnb.com", "societeinfo.com", "entreprises.lefigaro.fr", "infonet.fr", "doctrine.fr",
-    "youtube.com", "x.com", "twitter.com", "google.", "mappy.com", "yelp.", "tripadvisor.",
+    "dnb.com", "societeinfo.com", "infonet.fr", "doctrine.fr", "youtube.com", "x.com", "twitter.com", "google.",
+    "mappy.com", "yelp.", "tripadvisor.", "rocketreach.co", "tracxn.com", "pitchbook.com", "crunchbase.com",
+    "zoominfo.com", "apollo.io", "lusha.com", "signalhire.com", "contactout.com", "theorg.com", "owler.com",
+    "craft.co", "dealroom.co", "cbinsights.com", "drurls.com", "substack.com", "medium.com", "cylex", "118000.fr",
+    "118712.fr", "europages.", "b-reputation.com", "annuaire", "net-entreprises.fr", "bfmtv.com", "lesechos.fr",
+    "challenges.fr", "jobteaser.com", "apec.fr", "francetravail.fr", "meteojob.com", "monster.", "tiktok.com",
+    "pinterest.", "trustpilot.", "leboncoin.fr", "lagazettefrance.fr", "procompare.com", "solocal.com",
 )
+LEGAL_WORDS = {"sas", "sasu", "sarl", "eurl", "sa", "sca", "snc", "sci", "scop", "groupe", "group", "france",
+               "societe", "ste", "the", "les", "des", "et", "de", "du", "la", "le", "and", "cie", "co", "holding"}
 CONTACT_WORDS = ("contact", "recrut", "carriere", "career", "emploi", "job", "rejoindre", "join",
                  "mentions-legales", "mentions_legales", "legal", "about", "a-propos", "equipe", "team")
 CAREERS_WORDS = ("recrut", "carriere", "career", "emploi", "job", "rejoindre", "join-us", "joinus")
@@ -210,18 +217,49 @@ def _words(text: str) -> set[str]:
     return {w for w in re.split(r"[^a-z0-9]+", _ascii(text)) if len(w) > 2}
 
 
+def _name_tokens(name: str) -> list[str]:
+    return [w for w in re.split(r"[^a-z0-9]+", _ascii(name)) if w and w not in LEGAL_WORDS]
+
+
+def site_score(result: dict, name: str) -> float:
+    """Probabilité qu'un résultat soit le site officiel, d'après son adresse avant tout.
+
+    0 si c'est un annuaire ou si l'adresse ne rappelle pas le nom de l'entreprise : un titre qui
+    contient le nom ne suffit pas (les annuaires et agrégateurs titrent avec le nom de l'entreprise).
+    """
+    url = result.get("url", "")
+    domain = _domain(url)
+    tokens = _name_tokens(name)
+    if not domain or not tokens or any(d in domain for d in DIRECTORIES):
+        return 0
+    label = domain.split(".")[0].replace("-", "")
+    joined = "".join(tokens)
+    if label == joined or label in tokens:
+        score = 4.0
+    elif (len(joined) >= 4 and joined in label) or any(len(t) >= 4 and t in label for t in tokens):
+        score = 3.0
+    else:
+        return 0
+    score += 0.5 * sum(1 for t in tokens if t in label)  # « soprahr » couvre mieux « Sopra HR » que « soprasteria »
+    title = _words(result.get("title", ""))
+    if all(t in title for t in tokens if len(t) > 2):
+        score += 1
+    if urlparse(url).path in ("", "/") or len(urlparse(url).path) <= 6:
+        score += 1
+    if domain.endswith(".fr"):
+        score += 0.5
+    return score
+
+
 def pick_website(results: list[dict], name: str) -> str:
-    """Premier résultat qui n'est pas un annuaire et dont l'adresse ou le titre évoque l'entreprise."""
-    wanted = _words(name) - {"sas", "sarl", "groupe", "group", "france", "societe", "the", "les", "des"}
+    """Site officiel le plus probable parmi les résultats de recherche, sinon ""."""
+    best, best_score = "", 0.0
     for r in results:
-        url, domain = r.get("url", ""), _domain(r.get("url", ""))
-        if not domain or any(d in domain for d in DIRECTORIES):
-            continue
-        haystack = _words(domain.replace(".", " ") + " " + r.get("title", ""))
-        if not wanted or wanted & haystack:
-            parsed = urlparse(url)
-            return f"{parsed.scheme}://{parsed.hostname}/"
-    return ""
+        score = site_score(r, name)
+        if score > best_score:
+            parsed = urlparse(r["url"])
+            best, best_score = f"{parsed.scheme}://{parsed.hostname}/", score
+    return best
 
 
 def _deobfuscate(text: str) -> str:
@@ -265,11 +303,15 @@ def rank_emails(emails: set[str], domain: str) -> list[dict]:
 
 async def find_contact(name: str, city: str) -> dict:
     """Site officiel, e-mails publiés et page carrières d'une entreprise."""
-    try:
-        results = await websearch.search(f"{name} {city} site officiel", max_results=8)
-    except websearch.WebSearchError as exc:
-        raise CompanySearchError(str(exc)) from exc
-    website = pick_website(results, name)
+    website = ""
+    for query in (f"{name} {city}", f"{name} site web entreprise"):  # seconde formulation si la première échoue
+        try:
+            results = await websearch.search(query, max_results=8)
+        except websearch.WebSearchError as exc:
+            raise CompanySearchError(str(exc)) from exc
+        website = pick_website(results, name)
+        if website:
+            break
     if not website:
         return {"website": "", "emails": [], "careersUrl": "", "description": "", "pages": 0}
     domain = _domain(website)
