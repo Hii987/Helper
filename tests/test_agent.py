@@ -1,6 +1,8 @@
 import asyncio
 import json
 
+import httpx
+
 from app import agent, jobs, llm, websearch
 
 DDG_PAGE = """
@@ -148,3 +150,69 @@ def test_final_answer_is_requested_without_tool_history(monkeypatch):
     assert final_tools is None
     assert all(m["role"] != "tool" and not m.get("tool_calls") for m in final_messages)
     assert "bloqué" in final_messages[-1]["content"]
+
+
+class _FakeClient:
+    """Remplace httpx.AsyncClient : enregistre les requêtes et renvoie des réponses préparées."""
+    def __init__(self, responses, sent):
+        self.responses, self.sent = responses, sent
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def post(self, url, **kwargs):
+        self.sent.append((url, kwargs))
+        status, body = self.responses.pop(0)
+        request = httpx.Request("POST", url)
+        if isinstance(body, str):
+            return httpx.Response(status, text=body, request=request)
+        return httpx.Response(status, json=body, request=request)
+
+
+def _fake_http(monkeypatch, responses):
+    sent = []
+    monkeypatch.setattr(websearch.httpx, "AsyncClient", lambda **kw: _FakeClient(responses, sent))
+    return sent
+
+
+def test_tavily_is_used_when_configured(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
+    sent = _fake_http(monkeypatch, [(200, {"results": [
+        {"title": "Alternance <b>marketing</b>", "url": "https://www.indeed.fr/x", "content": "ACME recrute"},
+        {"title": "sans lien"},
+    ]})])
+    results = asyncio.run(websearch.search_jobs("marketing", "Lille", "alternance", max_results=5))
+    assert results == [{"title": "Alternance marketing", "url": "https://www.indeed.fr/x", "snippet": "ACME recrute"}]
+    url, kwargs = sent[0]
+    assert url == websearch.TAVILY_URL
+    assert kwargs["headers"]["Authorization"] == "Bearer tvly-test"
+    assert kwargs["json"]["query"] == "offre alternance marketing Lille"
+    assert "linkedin.com" in kwargs["json"]["include_domains"] and "indeed.fr" in kwargs["json"]["include_domains"]
+
+
+def test_duckduckgo_takes_over_when_tavily_fails(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
+    sent = _fake_http(monkeypatch, [(432, {}), (200, DDG_PAGE)])
+    results = asyncio.run(websearch.search("entreprise ACME"))
+    assert [u for u, _ in sent] == [websearch.TAVILY_URL, websearch.DDG_URL]
+    assert results[0]["url"] == "https://www.indeed.fr/viewjob?jk=1"
+
+
+def test_clear_errors(monkeypatch):
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    _fake_http(monkeypatch, [(202, "")])
+    try:
+        asyncio.run(websearch.search("x"))
+    except websearch.WebSearchError as exc:
+        assert "TAVILY_API_KEY" in str(exc)
+    else:
+        raise AssertionError("DuckDuckGo bloqué aurait dû lever une erreur")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-bad")
+    _fake_http(monkeypatch, [(401, {}), (202, "")])
+    try:
+        asyncio.run(websearch.search("x"))
+    except websearch.WebSearchError as exc:
+        assert "invalide" in str(exc)  # l'erreur Tavily est plus utile que celle de DuckDuckGo

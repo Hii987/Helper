@@ -33,7 +33,7 @@ Ouvre ensuite http://localhost:8000.
 
 ### Essayer sans Firebase (mode démo)
 
-Pour tester l'appli sur ton ordinateur sans configurer Firebase : seule `GROQ_API_KEY` est nécessaire dans `.env`.
+Pour tester l'appli sur ton ordinateur sans configurer Firebase : seule `GROQ_API_KEY` est nécessaire dans `.env` (et `TAVILY_API_KEY`, conseillée, pour la recherche web).
 
 ```bash
 python scripts/demo.py
@@ -58,6 +58,15 @@ La configuration web du projet est dans `static/auth.js`. La connexion par e-mai
 
 1. Crée une clé sur https://console.groq.com/keys.
 2. Mets-la dans `.env` : `GROQ_API_KEY=...` (modèle modifiable via `GROQ_MODEL`).
+
+### Recherche web : clé Tavily (recommandée, gratuite)
+
+La recherche d'offres, l'assistant et la préparation d'entretien cherchent sur le web. Sans clé, l'appli utilise DuckDuckGo, qui **bloque souvent les requêtes automatiques** (« DuckDuckGo bloque les recherches… »). Pour une recherche fiable :
+
+1. Crée un compte sur https://app.tavily.com (gratuit jusqu'à 1 000 recherches par mois, sans carte bancaire).
+2. Copie la clé (elle commence par `tvly-`) dans `.env` : `TAVILY_API_KEY=...`, puis redémarre l'appli.
+
+Si Tavily échoue (quota atteint…), DuckDuckGo prend le relais. En production : `printf %s "<clé>" | gcloud secrets create tavily-api-key --data-file=-`, puis ajoute `TAVILY_API_KEY=tavily-api-key:latest` à `--set-secrets`.
 
 ### API France Travail (optionnelle, gratuite)
 

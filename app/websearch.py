@@ -1,7 +1,13 @@
-"""Recherche web gratuite (DuckDuckGo, sans clé) et lecture de pages."""
+"""Recherche web et lecture de pages.
+
+Moteur : Tavily si TAVILY_API_KEY est défini (API gratuite jusqu'à 1 000 recherches par mois,
+fiable), sinon DuckDuckGo (sans clé, mais qui bloque souvent les requêtes automatiques).
+Si Tavily échoue (quota épuisé…), DuckDuckGo prend le relais.
+"""
 
 import html
 import ipaddress
+import os
 import re
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, unquote, urlparse
@@ -9,6 +15,9 @@ from urllib.parse import parse_qs, unquote, urlparse
 import httpx
 
 DDG_URL = "https://html.duckduckgo.com/html/"
+TAVILY_URL = "https://api.tavily.com/search"
+DDG_BLOCKED = ("DuckDuckGo bloque les recherches automatiques depuis cette connexion. "
+               "Ajoute une clé gratuite TAVILY_API_KEY dans .env (https://app.tavily.com) pour une recherche fiable.")
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -75,14 +84,58 @@ def parse_results(page: str) -> list[dict]:
     return results
 
 
-async def search(query: str, max_results: int = 8) -> list[dict]:
+def tavily_configured() -> bool:
+    return bool(os.getenv("TAVILY_API_KEY", "").strip())
+
+
+async def search(query: str, max_results: int = 8, domains: tuple[str, ...] = ()) -> list[dict]:
+    """Résultats {title, url, snippet}. `domains` limite la recherche à ces sites (Tavily uniquement)."""
+    if tavily_configured():
+        try:
+            return await search_tavily(query, max_results, domains)
+        except WebSearchError as tavily_error:
+            try:
+                return await search_ddg(query, max_results)
+            except WebSearchError:
+                raise tavily_error from None
+    return await search_ddg(query, max_results)
+
+
+async def search_tavily(query: str, max_results: int = 8, domains: tuple[str, ...] = ()) -> list[dict]:
+    key = os.getenv("TAVILY_API_KEY", "").strip()
+    body = {"query": query[:400], "max_results": max_results, "search_depth": "basic"}
+    if domains:
+        body["include_domains"] = list(domains)
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(TAVILY_URL, json=body, headers={"Authorization": f"Bearer {key}"})
+    except httpx.HTTPError as exc:
+        raise WebSearchError(f"Recherche web impossible : {exc}") from exc
+    if resp.status_code in (401, 403):
+        raise WebSearchError("Clé TAVILY_API_KEY invalide : vérifie-la sur https://app.tavily.com.")
+    if resp.status_code in (429, 432, 433):
+        raise WebSearchError("Quota de recherches Tavily atteint pour le moment (offre gratuite : 1 000 par mois).")
+    if resp.status_code != 200:
+        raise WebSearchError(f"Tavily a répondu {resp.status_code}.")
+    try:
+        items = resp.json().get("results") or []
+    except ValueError as exc:
+        raise WebSearchError("Réponse de Tavily illisible.") from exc
+    return [{
+        "title": _clean(r.get("title") or r.get("url", "")),
+        "url": r.get("url", ""),
+        "snippet": _clean(r.get("content") or "")[:300],
+    } for r in items if r.get("url")][:max_results]
+
+
+async def search_ddg(query: str, max_results: int = 8) -> list[dict]:
     try:
         async with httpx.AsyncClient(timeout=20, headers=HEADERS, follow_redirects=True) as client:
             resp = await client.post(DDG_URL, data={"q": query, "kl": "fr-fr"})
     except httpx.HTTPError as exc:
         raise WebSearchError(f"Recherche web impossible : {exc}") from exc
     if resp.status_code == 202:  # page anti-robot de DuckDuckGo
-        raise WebSearchError("DuckDuckGo bloque temporairement les recherches depuis cette connexion.")
+        raise WebSearchError(DDG_BLOCKED)
     if resp.status_code != 200:
         raise WebSearchError(f"Le moteur de recherche a répondu {resp.status_code}.")
     return parse_results(resp.text)[:max_results]
@@ -97,6 +150,12 @@ def job_query(keywords: str, location: str = "", kind: str = "emploi") -> str:
 
 
 async def search_jobs(keywords: str, location: str = "", kind: str = "emploi", max_results: int = 10) -> list[dict]:
+    if tavily_configured():
+        words = keywords.strip()
+        if kind in ("stage", "alternance") and kind not in words.lower():
+            words = f"{kind} {words}"
+        sites = tuple(dict.fromkeys(s.split("/")[0] for s in JOB_SITES))
+        return await search(f"offre {words} {location.strip()}".strip(), max_results, domains=sites)
     return await search(job_query(keywords, location, kind), max_results)
 
 
