@@ -32,7 +32,8 @@ FUNNEL = (
     ("reply_analyzed", "funnel.reply"),
     ("prep_generated", "funnel.prep"),
 )
-AI_EVENTS = ("offer_summarized", "reply_analyzed", "prep_generated", "chat_message", "text_written")
+AI_EVENTS = ("offer_summarized", "reply_analyzed", "prep_generated", "chat_message", "text_written",
+             "company_search", "spontaneous_written")
 
 _consent: dict[str, tuple[bool, float]] = {}
 

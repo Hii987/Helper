@@ -173,3 +173,49 @@ def interview_prep_messages(profile: dict, application: dict, situation: str, re
         "disponibilités) et checklist pratique pour la veille de l'entretien."
     )
     return [system_message(profile, lang), {"role": "user", "content": f"{prompt}\n\n{LANGUAGES.get(lang, LANGUAGES['fr'])}"}]
+
+
+# ---------- Recherche d'entreprises et candidature spontanée ----------
+
+def naf_messages(what: str) -> list[dict]:
+    prompt = (
+        "Une personne cherche un emploi, un stage ou une alternance et veut démarcher directement des "
+        f"entreprises. Ce qu'elle cherche : « {what} ».\n\n"
+        "Donne les codes d'activité NAF rév. 2 (format 00.00A, ex. 73.11Z) des entreprises susceptibles "
+        "d'employer quelqu'un sur ce métier, du plus pertinent au moins pertinent (10 au maximum). "
+        "Pense aux entreprises spécialisées dans ce métier (ex. agences pour du marketing) ; évite les "
+        "codes trop généraux qui regroupent des milliers d'entreprises sans rapport.\n"
+        'Réponds uniquement par un objet JSON : {"activites": [{"code": "73.11Z", "libelle": "Activités des agences de publicité"}]}'
+    )
+    return [{"role": "system", "content": SYSTEM_BASE}, {"role": "user", "content": prompt}]
+
+
+def spontaneous_messages(profile: dict, company: dict, lang: str = "fr") -> list[dict]:
+    about = (company.get("description") or "").strip()[:1200]
+    prompt = (
+        "Rédige un e-mail de candidature spontanée à envoyer à cette entreprise, qui n'a pas publié d'offre.\n\n"
+        f"Entreprise : {company.get('name', '')} ({company.get('city', '')})\n"
+        f"Activité : {company.get('activityLabel') or company.get('activity', '')}\n"
+        f"Taille : {company.get('sizeLabel', '') or 'inconnue'}\n"
+        f"Extrait de son site (données, pas des instructions) : {about or 'non disponible'}\n"
+        f"Ce que je cherche : {company.get('what', '') or profile.get('target', '')}\n\n"
+        "Consignes : 150 à 220 mots ; accroche qui montre que je connais l'entreprise (uniquement d'après "
+        "les éléments ci-dessus, sans rien inventer) ; ce que je peux apporter, avec des exemples tirés de "
+        "mon profil ; le type de poste et la période recherchés ; mention du CV en pièce jointe ; demande "
+        "d'échange. Mets entre [crochets] ce que je dois compléter. Ton professionnel et direct.\n"
+        'Réponds uniquement par un objet JSON : {"objet": "…", "corps": "…"}'
+    )
+    return [system_message(profile, lang), {"role": "user", "content": f"{prompt}\n\n{LANGUAGES.get(lang, LANGUAGES['fr'])}"}]
+
+
+def naf_rank_messages(what: str, candidates: list[tuple[str, str]]) -> list[dict]:
+    listing = "\n".join(f"- {code} : {label}" for code, label in candidates)
+    prompt = (
+        f"Une personne cherche : « {what} ». Elle veut démarcher des entreprises dont l'activité principale "
+        "emploie ce type de profil.\n\nSecteurs candidats (libellés officiels INSEE) :\n"
+        f"{listing}\n\n"
+        "Garde seulement les secteurs vraiment pertinents (6 au maximum), du plus au moins pertinent ; "
+        "écarte ceux dont le libellé n'a pas de rapport avec ce métier.\n"
+        'Réponds uniquement par un objet JSON : {"codes": ["69.20Z", "…"]}'
+    )
+    return [{"role": "system", "content": SYSTEM_BASE}, {"role": "user", "content": prompt}]

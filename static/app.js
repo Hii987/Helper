@@ -25,6 +25,7 @@ const ICONS = {
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   reply: '<path d="M10 7L4 12l6 5"/><path d="M4 12h11a5 5 0 0 1 5 5v2"/>',
+  building: '<path d="M4 21V5l8-3v19M12 21V9l8 3v9M2 21h20"/><path d="M7 8h2M7 12h2M7 16h2M15 14h2M15 17h2"/>',
   spark: '<path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M18 6l-3 3M9 15l-3 3"/>',
 };
 const GRIP = '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#9CA3AF">'
@@ -111,6 +112,7 @@ async function loadApps() {
 
 const NAV = [
   ["offers", "search", "nav.offers"],
+  ["companies", "building", "nav.companies"],
   ["reply", "reply", "nav.reply"],
   ["assistant", "chat", "nav.assistant"],
   ["write", "pen", "nav.write"],
@@ -156,6 +158,7 @@ function route() {
   track("$pageview", { page: pageName(location.hash) });
   renderConsent();
   if (page === "offers") return showOfferSearch();
+  if (page === "companies") return showCompanies();
   if (page === "reply") return showReply();
   if (page === "assistant") return showAssistant();
   if (page === "write") return showWrite(id, sub);

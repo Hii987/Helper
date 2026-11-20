@@ -10,6 +10,7 @@ Application web pour suivre ses candidatures (emploi, stage, alternance). Chaque
 | **Candidature** | Page de lecture pensée pour répondre à un recruteur : points clés de l'offre d'abord (ou l'e-mail envoyé pour une candidature spontanée), puis l'offre, le CV, le contact, l'e-mail, la lettre. |
 | **Création / modification** | Deux types : à une offre ou spontanée. Seules les bases sont obligatoires ; les sections (lien de l'offre, points clés, CV, lettre, e-mail, contact, section libre) s'ajoutent, se retirent et se réordonnent. **« Fetch and summarize »** lit la page de l'offre et l'IA (**Groq**) remplit les points clés ; un champ inconnu reste vide. |
 | **Offer search** | Recherche d'offres sur le web et via l'API France Travail ; « Track » crée une candidature à partir d'une offre. |
+| **Find companies** | Candidatures spontanées, là où il y a moins de concurrence : l'utilisateur indique ce qu'il cherche, un lieu et un rayon (jusqu'à 50 km). L'IA choisit les secteurs d'activité (codes NAF, vérifiés dans la nomenclature officielle de l'INSEE) et l'**API publique « Recherche d'entreprises »** liste les entreprises actives du périmètre, triées par pertinence du secteur puis distance, filtrables par taille. Pour une entreprise : recherche de son site et des **adresses e-mail publiées** (recrutement@, contact@…, jamais devinées), rédaction d'un e-mail de candidature spontanée, ouverture dans la messagerie de l'utilisateur (qui l'envoie lui-même) et ajout à la Box. |
 | **Recruiter reply** | Colle le message d'un recruteur : l'IA en extrait le type de réponse (entretien, test, offre, demande d'infos, refus), la date, l'échéance et le contact. La candidature est retrouvée d'après l'entreprise et le poste (ou créée), puis mise à jour : statut, **prochaine étape** (affichée dans la Box), contact, historique des échanges. |
 | **Préparation d'entretien** | Sur la page d'une candidature, générée automatiquement après une réponse positive : recherches web sur l'entreprise, puis fiche avec la situation, l'entreprise (sourcée), une **analyse détaillée de chaque compétence demandée** face au CV envoyé (ou à celui du profil), un pitch, les questions probables et à poser, une checklist. |
 | **Assistant** | Discussion avec l'IA qui cherche elle-même sur le web : offres, entreprises qui recrutent, salaires, formations. |
@@ -58,6 +59,10 @@ La configuration web du projet est dans `static/auth.js`. La connexion par e-mai
 
 1. Crée une clé sur https://console.groq.com/keys.
 2. Mets-la dans `.env` : `GROQ_API_KEY=...` (modèle modifiable via `GROQ_MODEL`).
+
+### Trouver des entreprises : services utilisés
+
+Aucune clé nécessaire : géolocalisation par la Géoplateforme (`data.geopf.fr`) et annuaire officiel des entreprises (`recherche-entreprises.api.gouv.fr`, limité à 7 requêtes par seconde). La nomenclature NAF est embarquée dans `app/data/naf.json` (liste INSEE via le paquet `@socialgouv/codes-naf`). La recherche du contact passe par la recherche web : une clé Tavily est fortement conseillée.
 
 ### Recherche web : clé Tavily (recommandée, gratuite)
 
@@ -115,6 +120,8 @@ app/
   store.py     # Firestore : candidatures, fichiers, profils, événements
   offer.py     # lecture d'une offre + résumé en points clés par l'IA
   replies.py   # réponses de recruteurs → mise à jour de la candidature ; préparation d'entretien
+  companies.py # entreprises à démarcher : secteurs NAF, annuaire officiel, contact publié, candidature spontanée
+  data/naf.json # nomenclature officielle NAF rév. 2 (code → libellé)
   agent.py     # assistant avec outils de recherche web (function calling)
   prompts.py   # prompts (assistant, lettre, CV, e-mails, réponses, préparation)
   analytics.py # statistiques d'usage : consentement, événements, PostHog, agrégats
@@ -122,7 +129,7 @@ app/
   websearch.py # recherche web (DuckDuckGo) et lecture de pages
   jobs.py      # offres France Travail + liens externes
 static/        # interface web sans build : app.js (Box, candidatures, offres), ai.js (pages IA),
-               # stats.js (Statistics), track.js (envoi des événements), i18n.js (textes EN/FR), auth.js
+               # stats.js (Statistics), companies.js (Find companies), track.js (envoi des événements), i18n.js (textes EN/FR), auth.js
 tests/
 ```
 

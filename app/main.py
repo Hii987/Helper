@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-from . import agent, analytics, jobs, llm, offer, prompts, replies, store, websearch  # noqa: E402  (après load_dotenv)
+from . import agent, analytics, companies, jobs, llm, offer, prompts, replies, store, websearch  # noqa: E402  (après load_dotenv)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 MAX_FILE_BYTES = 10_000_000
@@ -80,6 +80,27 @@ class WriteRequest(BaseModel):
     received: str = ""
     goal: str = "reply"
     tone: str = ""
+    lang: Lang = "fr"
+
+
+class CompanySearchIn(BaseModel):
+    what: str
+    where: str
+    radius: float = 10
+    minSize: int = 1
+    page: int = 1
+    activities: list[str] = []
+
+
+class CompanyContactIn(BaseModel):
+    name: str
+    city: str = ""
+
+
+class SpontaneousIn(BaseModel):
+    company: dict
+    what: str = ""
+    description: str = ""
     lang: Lang = "fr"
 
 
@@ -445,6 +466,60 @@ async def search_jobs(q: str = "", location: str = "", department: str = "", kin
     analytics.capture(uid, "job_search", {"kind": kind, "results": len(result["offers"]) + len(result["web"]),
                                           "web_ok": result["web_error"] is None})
     return result
+
+
+# ---------- Entreprises à démarcher (candidatures spontanées) ----------
+
+@app.post("/api/companies/search")
+async def search_companies(req: CompanySearchIn, uid: str = Depends(current_user)):
+    if not req.what.strip() or not req.where.strip():
+        raise HTTPException(status_code=400, detail="Say what you are looking for and where.")
+    started = time.monotonic()
+    labels = companies.naf_labels()
+    try:
+        center = await companies.geocode(req.where)
+        if req.activities:  # secteurs déjà choisis (page suivante, secteur retiré par la personne)
+            activities = [{"code": c, "label": labels[c]} for c in req.activities if c in labels][:companies.MAX_ACTIVITIES]
+        else:
+            activities = await companies.choose_activities(req.what)
+        if not activities:
+            raise companies.CompanySearchError("Choose at least one sector.")
+        found = await companies.search(center, activities, req.radius, max(0, req.minSize), max(1, req.page))
+    except companies.CompanySearchError as exc:
+        analytics.capture(uid, "company_search", {"ok": False, "ms": _ms(started), "error": "search"})
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except llm.LLMError as exc:
+        _ai_error(uid, "company_search", started, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    analytics.capture(uid, "company_search", {"ok": True, "ms": _ms(started), "results": len(found["results"]),
+                                              "radius": req.radius, "page": req.page})
+    return {"center": center, "activities": activities, **found}
+
+
+@app.post("/api/companies/contact")
+async def company_contact(req: CompanyContactIn, uid: str = Depends(current_user)):
+    started = time.monotonic()
+    try:
+        contact = await companies.find_contact(req.name, req.city)
+    except companies.CompanySearchError as exc:
+        analytics.capture(uid, "company_contact", {"ok": False, "ms": _ms(started), "error": "search"})
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    analytics.capture(uid, "company_contact", {"ok": True, "ms": _ms(started), "website": bool(contact["website"]),
+                                               "emails": len(contact["emails"])})
+    return contact
+
+
+@app.post("/api/companies/application")
+async def spontaneous_application(req: SpontaneousIn, uid: str = Depends(current_user)):
+    started = time.monotonic()
+    company = {**req.company, "what": req.what, "description": req.description}
+    try:
+        email = await companies.write_application(store.get_profile(uid), company, req.lang)
+    except llm.LLMError as exc:
+        _ai_error(uid, "spontaneous_written", started, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    analytics.capture(uid, "spontaneous_written", {"ok": True, "ms": _ms(started)})
+    return email
 
 
 # ---------- Statistiques d'usage ----------

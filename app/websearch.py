@@ -209,12 +209,13 @@ def _is_local(hostname: str) -> bool:
     return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
 
 
-async def fetch_page(url: str, max_chars: int = 6000) -> dict:
+async def fetch_html(url: str, timeout: float = 20) -> tuple[str, str]:
+    """Renvoie (adresse finale, HTML brut) d'une page web publique."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname or _is_local(parsed.hostname):
         raise WebSearchError("Adresse invalide.")
     try:
-        async with httpx.AsyncClient(timeout=20, headers=HEADERS, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=timeout, headers=HEADERS, follow_redirects=True) as client:
             resp = await client.get(url)
     except httpx.HTTPError as exc:
         raise WebSearchError(f"Page inaccessible : {exc}") from exc
@@ -222,11 +223,16 @@ async def fetch_page(url: str, max_chars: int = 6000) -> dict:
         raise WebSearchError(f"Page inaccessible ({resp.status_code}).")
     if "html" not in resp.headers.get("content-type", "html"):
         raise WebSearchError("Ce lien ne pointe pas vers une page web.")
-    title, text = html_to_text(resp.text)
-    offer = offer_html(resp.url.host, resp.text)
+    return str(resp.url), resp.text
+
+
+async def fetch_page(url: str, max_chars: int = 6000) -> dict:
+    final_url, page = await fetch_html(url)
+    title, text = html_to_text(page)
+    offer = offer_html(urlparse(final_url).hostname or "", page)
     if offer:
         text = html_to_text(offer)[1]
-    return {"url": str(resp.url), "title": title, "text": text[:max_chars]}
+    return {"url": final_url, "title": title, "text": text[:max_chars]}
 
 
 def offer_html(hostname: str, page: str) -> str:
