@@ -31,6 +31,16 @@ uvicorn app.main:app --reload
 
 Ouvre ensuite http://localhost:8000.
 
+### Essayer sans Firebase (mode démo)
+
+Pour tester l'appli sur ton ordinateur sans configurer Firebase : seule `GROQ_API_KEY` est nécessaire dans `.env`.
+
+```bash
+python scripts/demo.py
+```
+
+Ouvre http://localhost:8000 : tu es connecté automatiquement avec un compte de démonstration, administrateur (page Statistics visible). Les données restent en mémoire et sont **effacées à l'arrêt** (Ctrl + C). Ce mode ne sert qu'aux essais locaux, jamais au déploiement.
+
 ### Firestore (gratuit, plan Spark)
 
 Les candidatures et les PDF sont stockés dans Firestore. Les PDF sont découpés en morceaux de 900 Ko (un document par morceau) : pas besoin de Cloud Storage, qui exige le plan payant.
